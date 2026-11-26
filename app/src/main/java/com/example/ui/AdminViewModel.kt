@@ -41,9 +41,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class AdminViewModel(
-    private val adminRepository: AdminRepository,
-    private val cmsRepository: AdminCmsRepository,
-    private val notificationRepository: NotificationDispatchRepository
+    private val adminRepository: AdminRepository? = null,
+    private val cmsRepository: AdminCmsRepository? = null,
+    private val notificationRepository: NotificationDispatchRepository? = null
 ) : ViewModel() {
 
     private val _sessionState = MutableStateFlow<AdminSessionState>(AdminSessionState.NotAdmin)
@@ -187,10 +187,21 @@ class AdminViewModel(
         if (!forceRefresh && lastVerifiedUid == user.uid && _sessionState.value is AdminSessionState.Authorized) {
             return
         }
+        val adminRepo = adminRepository
+        if (adminRepo == null) {
+            stopObservers()
+            val verifiedSupabase = supabaseVerifiedAdmin
+            _sessionState.value = if (verifiedSupabase != null && verifiedSupabase.active) {
+                AdminSessionState.Authorized(verifiedSupabase)
+            } else {
+                AdminSessionState.NotAdmin
+            }
+            return
+        }
         lastVerifiedUid = user.uid
         _sessionState.value = AdminSessionState.Loading
         viewModelScope.launch {
-            val result = adminRepository.verifyAndResolveAdmin(user)
+            val result = adminRepo.verifyAndResolveAdmin(user)
             val resolved = result.getOrNull()
             if (resolved != null && resolved.active) {
                 _sessionState.value = AdminSessionState.Authorized(resolved)
@@ -199,7 +210,7 @@ class AdminViewModel(
                     _selectedModule.value = AdminModule.DASHBOARD_OVERVIEW
                 }
                 startRoleObservers(resolved)
-                cmsRepository.seedCmsDefaultsIfEmpty(resolved)
+                cmsRepository?.seedCmsDefaultsIfEmpty(resolved)
             } else {
                 stopObservers()
                 val verifiedSupabase = supabaseVerifiedAdmin
@@ -246,38 +257,41 @@ class AdminViewModel(
 
     private fun startRoleObservers(actor: AdminUser) {
         stopObservers()
+        val adminRepo = adminRepository ?: return
+        val cmsRepo = cmsRepository ?: return
+        val notifRepo = notificationRepository ?: return
         val role = actor.resolvedRole
 
         observerJobs += viewModelScope.launch {
-            adminRepository.observeActivityLogs().collect { _activityLogs.value = it }
+            adminRepo.observeActivityLogs().collect { _activityLogs.value = it }
         }
         if (role == AdminRole.SUPER_ADMIN || role == AdminRole.REPORTING_ADMIN) {
-            observerJobs += viewModelScope.launch { adminRepository.observeClients().collect { _clients.value = it } }
-            observerJobs += viewModelScope.launch { adminRepository.observeAdminUsers().collect { _adminUsers.value = it } }
-            observerJobs += viewModelScope.launch { adminRepository.observeSettings().collect { _settings.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeClients().collect { _clients.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeAdminUsers().collect { _adminUsers.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeSettings().collect { _settings.value = it } }
         }
         if (role == AdminRole.SUPER_ADMIN) {
-            observerJobs += viewModelScope.launch { adminRepository.observeAdminInvites().collect { _adminInvites.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeAdminInvites().collect { _adminInvites.value = it } }
         }
         if (role == AdminRole.SUPER_ADMIN || role == AdminRole.REPORTING_ADMIN || role == AdminRole.CONSULTANT) {
-            observerJobs += viewModelScope.launch { adminRepository.observeInquiries(actor).collect { _inquiries.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeInquiries(actor).collect { _inquiries.value = it } }
         }
         if (role == AdminRole.SUPER_ADMIN || role == AdminRole.RECRUITMENT_ADMIN || role == AdminRole.REPORTING_ADMIN) {
-            observerJobs += viewModelScope.launch { cmsRepository.observeAllVacancies().collect { _vacancies.value = it } }
-            observerJobs += viewModelScope.launch { adminRepository.observeCandidates().collect { _candidates.value = it } }
-            observerJobs += viewModelScope.launch { adminRepository.observeApplications().collect { _applications.value = it } }
-            observerJobs += viewModelScope.launch { adminRepository.observeNotifications().collect { _notifications.value = it } }
-            observerJobs += viewModelScope.launch { notificationRepository.observeControls().collect { _notificationControls.value = it } }
-            observerJobs += viewModelScope.launch { notificationRepository.observeDeliveryLogs().collect { _deliveryLogs.value = it } }
-            observerJobs += viewModelScope.launch { notificationRepository.observeAllDeviceTokens().collect { _deviceTokens.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observeAllVacancies().collect { _vacancies.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeCandidates().collect { _candidates.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeApplications().collect { _applications.value = it } }
+            observerJobs += viewModelScope.launch { adminRepo.observeNotifications().collect { _notifications.value = it } }
+            observerJobs += viewModelScope.launch { notifRepo.observeControls().collect { _notificationControls.value = it } }
+            observerJobs += viewModelScope.launch { notifRepo.observeDeliveryLogs().collect { _deliveryLogs.value = it } }
+            observerJobs += viewModelScope.launch { notifRepo.observeAllDeviceTokens().collect { _deviceTokens.value = it } }
         }
         if (role == AdminRole.SUPER_ADMIN || role == AdminRole.CONTENT_ADMIN || role == AdminRole.REPORTING_ADMIN) {
-            observerJobs += viewModelScope.launch { cmsRepository.observeAllServices().collect { _services.value = it } }
-            observerJobs += viewModelScope.launch { cmsRepository.observeAllCategories().collect { _categories.value = it } }
-            observerJobs += viewModelScope.launch { cmsRepository.observeSitePages().collect { _sitePages.value = it } }
-            observerJobs += viewModelScope.launch { cmsRepository.observePortfolioItems().collect { _portfolioItems.value = it } }
-            observerJobs += viewModelScope.launch { cmsRepository.observeTestimonials().collect { _testimonials.value = it } }
-            observerJobs += viewModelScope.launch { cmsRepository.observeTeamMembers().collect { _teamMembers.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observeAllServices().collect { _services.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observeAllCategories().collect { _categories.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observeSitePages().collect { _sitePages.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observePortfolioItems().collect { _portfolioItems.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observeTestimonials().collect { _testimonials.value = it } }
+            observerJobs += viewModelScope.launch { cmsRepo.observeTeamMembers().collect { _teamMembers.value = it } }
         }
     }
 
@@ -299,12 +313,15 @@ class AdminViewModel(
         }
     }
 
+    private fun missingBackend(): Result<Unit> =
+        Result.failure(IllegalStateException("Firebase admin backend is not available in this build."))
+
     fun updateClient(client: ClientProfile) = launchMutation("Updated ${client.companyName}.") {
-        adminRepository.updateClientProfileAdmin(it, client)
+        adminRepository?.updateClientProfileAdmin(it, client) ?: missingBackend()
     }
 
     fun deleteClient(client: ClientProfile) = launchMutation("Removed client record.") {
-        adminRepository.deleteClientProfileAdmin(it, client)
+        adminRepository?.deleteClientProfileAdmin(it, client) ?: missingBackend()
     }
 
     fun updateInquiry(
@@ -313,42 +330,48 @@ class AdminViewModel(
         notes: String,
         consultant: AdminUser?
     ) = launchMutation("Updated enquiry ${inquiry.propertyName}.") {
-        adminRepository.updateInquiryAdmin(it, inquiry, status, notes, consultant)
+        adminRepository?.updateInquiryAdmin(it, inquiry, status, notes, consultant) ?: missingBackend()
     }
 
     fun deleteInquiry(inquiry: ConsultationInquiry) = launchMutation("Deleted enquiry.") {
-        adminRepository.deleteInquiryAdmin(it, inquiry)
+        adminRepository?.deleteInquiryAdmin(it, inquiry) ?: missingBackend()
     }
 
     fun saveService(service: ServiceOffering) = launchMutation("Saved service ${service.title}.") {
-        cmsRepository.saveService(it, service)
+        cmsRepository?.saveService(it, service) ?: missingBackend()
     }
 
     fun deleteService(service: ServiceOffering) = launchMutation("Deleted service ${service.title}.") {
-        cmsRepository.deleteService(it, service)
+        cmsRepository?.deleteService(it, service) ?: missingBackend()
     }
 
     fun saveCategory(cat: ServiceCategoryRecord) = launchMutation("Saved category ${cat.title}.") {
-        cmsRepository.saveCategory(it, cat)
+        cmsRepository?.saveCategory(it, cat) ?: missingBackend()
     }
 
     fun deleteCategory(cat: ServiceCategoryRecord) = launchMutation("Deleted category.") {
-        cmsRepository.deleteCategory(it, cat)
+        cmsRepository?.deleteCategory(it, cat) ?: missingBackend()
     }
 
     fun saveVacancy(vacancy: JobVacancyRecord, supabaseAccessToken: String? = null) {
         val actor = currentActor() ?: return
+        val cmsRepo = cmsRepository
+        if (cmsRepo == null) {
+            _feedback.value = "Firebase admin backend is not available in this build."
+            return
+        }
         viewModelScope.launch {
             _isBusy.value = true
-            val saveRes = cmsRepository.saveVacancy(actor, vacancy)
+            val saveRes = cmsRepo.saveVacancy(actor, vacancy)
             if (saveRes.isFailure) {
                 _isBusy.value = false
                 _feedback.value = saveRes.exceptionOrNull()?.message ?: "Failed to save vacancy."
                 return@launch
             }
             val controls = _notificationControls.value
-            if (vacancy.published && controls.autoDispatchOnPublish && _candidates.value.isNotEmpty()) {
-                val dispatchRes = notificationRepository.dispatchMatchedVacancyNotifications(
+            val notifRepo = notificationRepository
+            if (notifRepo != null && vacancy.published && controls.autoDispatchOnPublish && _candidates.value.isNotEmpty()) {
+                val dispatchRes = notifRepo.dispatchMatchedVacancyNotifications(
                     actor = actor,
                     vacancy = vacancy,
                     candidates = _candidates.value,
@@ -374,9 +397,14 @@ class AdminViewModel(
 
     fun dispatchMatchedVacancyAlerts(vacancy: JobVacancyRecord, supabaseAccessToken: String? = null) {
         val actor = currentActor() ?: return
+        val notifRepo = notificationRepository
+        if (notifRepo == null) {
+            _feedback.value = "Firebase admin backend is not available in this build."
+            return
+        }
         viewModelScope.launch {
             _isBusy.value = true
-            val res = notificationRepository.dispatchMatchedVacancyNotifications(
+            val res = notifRepo.dispatchMatchedVacancyNotifications(
                 actor = actor,
                 vacancy = vacancy,
                 candidates = _candidates.value,
@@ -398,19 +426,19 @@ class AdminViewModel(
 
     fun saveNotificationControls(controls: NotificationControlSettings) =
         launchMutation("Saved notification channel & matching controls.") {
-            notificationRepository.saveControls(it, controls)
+            notificationRepository?.saveControls(it, controls) ?: missingBackend()
         }
 
     fun deleteVacancy(vacancy: JobVacancyRecord) = launchMutation("Deleted vacancy.") {
-        cmsRepository.deleteVacancy(it, vacancy)
+        cmsRepository?.deleteVacancy(it, vacancy) ?: missingBackend()
     }
 
     fun toggleCandidateAlerts(candidate: CandidateProfile) = launchMutation("Updated alert preference for ${candidate.fullName}.") {
-        adminRepository.toggleCandidateAlertsAdmin(it, candidate)
+        adminRepository?.toggleCandidateAlertsAdmin(it, candidate) ?: missingBackend()
     }
 
     fun clearCandidateCv(candidate: CandidateProfile) = launchMutation("Cleared CV vault record for ${candidate.fullName}.") {
-        adminRepository.removeCandidateCvAdmin(it, candidate)
+        adminRepository?.removeCandidateCvAdmin(it, candidate) ?: missingBackend()
     }
 
     fun updateApplicationStatus(
@@ -419,11 +447,12 @@ class AdminViewModel(
         notifyCandidate: Boolean,
         supabaseAccessToken: String? = null
     ) = launchMutation("Updated application to ${status.label}.") { actor ->
+        val adminRepo = adminRepository ?: return@launchMutation missingBackend()
         val controls = _notificationControls.value
         val shouldNotify = notifyCandidate && controls.enableApplicationStatusAlerts
-        val res = adminRepository.updateApplicationStatusAdmin(actor, app, status, shouldNotify)
+        val res = adminRepo.updateApplicationStatusAdmin(actor, app, status, shouldNotify)
         if (res.isSuccess && shouldNotify) {
-            notificationRepository.logApplicationStatusDispatch(
+            notificationRepository?.logApplicationStatusDispatch(
                 actor = actor,
                 application = app,
                 newStatus = status,
@@ -436,7 +465,7 @@ class AdminViewModel(
     }
 
     fun deleteApplication(app: JobApplication) = launchMutation("Deleted application.") {
-        adminRepository.deleteApplicationAdmin(it, app)
+        adminRepository?.deleteApplicationAdmin(it, app) ?: missingBackend()
     }
 
     fun sendNotification(
@@ -447,58 +476,60 @@ class AdminViewModel(
         department: String,
         location: String
     ) = launchMutation("Dispatched job notification.") {
-        adminRepository.sendCandidateNotificationAdmin(it, targetUserId, roleId, title, message, department, location)
+        adminRepository?.sendCandidateNotificationAdmin(it, targetUserId, roleId, title, message, department, location)
+            ?: missingBackend()
     }
 
     fun deleteNotification(notification: JobNotification) = launchMutation("Deleted notification.") {
-        adminRepository.deleteNotificationAdmin(it, notification)
+        adminRepository?.deleteNotificationAdmin(it, notification) ?: missingBackend()
     }
 
     fun saveSitePage(page: SitePageContent) = launchMutation("Updated page ${page.pageTitle}.") {
-        cmsRepository.saveSitePage(it, page)
+        cmsRepository?.saveSitePage(it, page) ?: missingBackend()
     }
 
     fun deleteSitePage(page: SitePageContent) = launchMutation("Deleted site page.") {
-        cmsRepository.deleteSitePage(it, page)
+        cmsRepository?.deleteSitePage(it, page) ?: missingBackend()
     }
 
     fun savePortfolioItem(item: PortfolioItemRecord) = launchMutation("Saved portfolio item ${item.propertyName}.") {
-        cmsRepository.savePortfolioItem(it, item)
+        cmsRepository?.savePortfolioItem(it, item) ?: missingBackend()
     }
 
     fun deletePortfolioItem(item: PortfolioItemRecord) = launchMutation("Deleted portfolio item.") {
-        cmsRepository.deletePortfolioItem(it, item)
+        cmsRepository?.deletePortfolioItem(it, item) ?: missingBackend()
     }
 
     fun saveTestimonial(item: TestimonialRecord) = launchMutation("Saved testimonial.") {
-        cmsRepository.saveTestimonial(it, item)
+        cmsRepository?.saveTestimonial(it, item) ?: missingBackend()
     }
 
     fun deleteTestimonial(item: TestimonialRecord) = launchMutation("Deleted testimonial.") {
-        cmsRepository.deleteTestimonial(it, item)
+        cmsRepository?.deleteTestimonial(it, item) ?: missingBackend()
     }
 
     fun saveTeamMember(member: TeamMemberRecord) = launchMutation("Saved team profile ${member.fullName}.") {
-        cmsRepository.saveTeamMember(it, member)
+        cmsRepository?.saveTeamMember(it, member) ?: missingBackend()
     }
 
     fun deleteTeamMember(member: TeamMemberRecord) = launchMutation("Deleted team profile.") {
-        cmsRepository.deleteTeamMember(it, member)
+        cmsRepository?.deleteTeamMember(it, member) ?: missingBackend()
     }
 
     fun inviteAdmin(email: String, displayName: String, role: AdminRole) = launchMutation("Saved admin invite for $email.") {
-        adminRepository.saveAdminInvite(it, AdminInvite(email = email, displayName = displayName, role = role.name, active = true))
+        adminRepository?.saveAdminInvite(it, AdminInvite(email = email, displayName = displayName, role = role.name, active = true))
+            ?: missingBackend()
     }
 
     fun revokeInvite(invite: AdminInvite) = launchMutation("Revoked invite.") {
-        adminRepository.deleteAdminInvite(it, invite)
+        adminRepository?.deleteAdminInvite(it, invite) ?: missingBackend()
     }
 
     fun updateAdminRoleAndStatus(target: AdminUser, role: AdminRole, active: Boolean) = launchMutation("Updated ${target.email}.") {
-        adminRepository.updateAdminUser(it, target.copy(role = role.name, active = active))
+        adminRepository?.updateAdminUser(it, target.copy(role = role.name, active = active)) ?: missingBackend()
     }
 
     fun savePlatformSettings(settings: AdminSettings) = launchMutation("Saved platform settings.") {
-        adminRepository.saveSettings(it, settings)
+        adminRepository?.saveSettings(it, settings) ?: missingBackend()
     }
 }

@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -81,6 +82,7 @@ import com.example.auth.SupabaseSession
 import com.example.auth.SupabaseTalentClient
 import com.example.auth.attemptAutoSignIn
 import com.example.auth.authStateFlow
+import com.example.auth.firebaseAuthOrNull
 import com.example.auth.signOut
 import com.example.data.AdminCmsRepository
 import com.example.data.AdminRepository
@@ -131,10 +133,9 @@ import com.example.ui.theme.MilaCharcoalSurface
 import com.example.ui.theme.MilaHospitalityTheme
 import com.example.ui.theme.MilaIvory
 import com.example.ui.theme.MilaWarmStone
-import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 const val ROUTE_HOME = "home"
@@ -203,6 +204,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun firestoreOrNull(context: Context): FirebaseFirestore? = runCatching {
+    val databaseId = context.getString(R.string.firestore_database_id)
+    FirebaseFirestore.getInstance(databaseId)
+}.getOrNull()
+
 @Composable
 fun MilaAppRoot() {
     val context = LocalContext.current
@@ -214,8 +220,10 @@ fun MilaAppRoot() {
     val supabaseTalentClient = remember { SupabaseTalentClient() }
     val supabaseCandidateSession by supabaseTalentClient.session.collectAsStateWithLifecycle()
     val pendingDraftCandidate by supabaseTalentClient.pendingDraftCandidate.collectAsStateWithLifecycle()
-    val currentUser by Firebase.auth.authStateFlow()
-        .collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
+    val firebaseAuth = remember { firebaseAuthOrNull() }
+    val currentUser by remember(firebaseAuth) {
+        firebaseAuth?.authStateFlow() ?: flowOf(null)
+    }.collectAsStateWithLifecycle(initialValue = firebaseAuth?.currentUser)
 
     LaunchedEffect(Unit) {
         attemptAutoSignIn(
@@ -231,9 +239,11 @@ fun MilaAppRoot() {
         factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY])
-                val databaseId = app.getString(R.string.firestore_database_id)
-                val db = FirebaseFirestore.getInstance(databaseId)
-                ServiceCatalogViewModel(ServiceCatalogRepository(db), PublicCmsRepository(db))
+                val db = firestoreOrNull(app)
+                ServiceCatalogViewModel(
+                    repository = db?.let { ServiceCatalogRepository(it) },
+                    publicCmsRepository = db?.let { PublicCmsRepository(it) }
+                )
             }
         }
     )
@@ -246,13 +256,12 @@ fun MilaAppRoot() {
         factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY])
-                val databaseId = app.getString(R.string.firestore_database_id)
-                val db = FirebaseFirestore.getInstance(databaseId)
-                val adminRepo = AdminRepository(db)
+                val db = firestoreOrNull(app)
+                val adminRepo = db?.let { AdminRepository(it) }
                 AdminViewModel(
                     adminRepository = adminRepo,
-                    cmsRepository = AdminCmsRepository(db, adminRepo),
-                    notificationRepository = NotificationDispatchRepository(db, adminRepo)
+                    cmsRepository = if (db != null && adminRepo != null) AdminCmsRepository(db, adminRepo) else null,
+                    notificationRepository = if (db != null && adminRepo != null) NotificationDispatchRepository(db, adminRepo) else null
                 )
             }
         }
@@ -290,16 +299,14 @@ fun MilaAppRoot() {
         )
     } else {
         val user = currentUser
-        if (user != null) {
+        val firebaseDb = remember(context) { firestoreOrNull(context) }
+        if (user != null && firebaseDb != null) {
             key(user.uid) {
                 val mandatesViewModel: MandatesViewModel = viewModel(
                     key = user.uid,
                     factory = viewModelFactory {
                         initializer {
-                            val app = checkNotNull(this[APPLICATION_KEY])
-                            val databaseId = app.getString(R.string.firestore_database_id)
-                            val db = FirebaseFirestore.getInstance(databaseId)
-                            MandatesViewModel(MilaRepository(db), user.uid)
+                            MandatesViewModel(MilaRepository(firebaseDb), user.uid)
                         }
                     }
                 )
@@ -376,7 +383,7 @@ fun MilaAppRoot() {
             adminSessionState = adminSessionState,
             onRetryVerify = {
                 adminGateError = null
-                adminViewModel.verifyUserAccess(Firebase.auth.currentUser, forceRefresh = true)
+                adminViewModel.verifyUserAccess(firebaseAuth?.currentUser, forceRefresh = true)
             },
             onEnterPortal = {
                 showAdminGateDialog = false
@@ -436,8 +443,7 @@ private fun MilaAppShell(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val pushTokenManager = remember(context) {
-        val dbId = context.getString(R.string.firestore_database_id)
-        PushTokenManager(FirebaseFirestore.getInstance(dbId))
+        PushTokenManager(firestoreOrNull(context))
     }
 
     LaunchedEffect(currentUser?.uid, supabaseCandidateSession?.userId) {

@@ -25,9 +25,9 @@ class MilaFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull() ?: return
         val dbId = runCatching { getString(R.string.firestore_database_id) }.getOrDefault("(default)")
-        val db = FirebaseFirestore.getInstance(dbId)
+        val db = runCatching { FirebaseFirestore.getInstance(dbId) }.getOrNull() ?: return
         val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(80)
         val record = CandidateDeviceToken(
             userId = uid,

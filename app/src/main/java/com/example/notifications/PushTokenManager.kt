@@ -18,7 +18,7 @@ import org.json.JSONObject
  * across Firestore (`users/{uid}/deviceTokens/android_primary`) and Supabase (`device_push_tokens`).
  */
 class PushTokenManager(
-    private val db: FirebaseFirestore,
+    private val db: FirebaseFirestore? = null,
     private val httpClient: OkHttpClient = OkHttpClient()
 ) {
     suspend fun registerAndroidToken(
@@ -31,7 +31,7 @@ class PushTokenManager(
         val token = runCatching { FirebaseMessaging.getInstance().token.await() }.getOrNull()
         val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android Device" }.take(80)
 
-        if (!firebaseUid.isNullOrBlank()) {
+        if (!firebaseUid.isNullOrBlank() && db != null) {
             val tokenValue = token?.takeIf { it.length >= 20 }
                 ?: "pending_fcm_${firebaseUid.take(12)}_${System.currentTimeMillis()}"
             val doc = CandidateDeviceToken(

@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class ServiceCatalogViewModel(
-    repository: ServiceCatalogRepository,
+    repository: ServiceCatalogRepository? = null,
     publicCmsRepository: PublicCmsRepository? = null,
     private val supabaseDb: SupabaseDatabaseClient = SupabaseDatabaseClient()
 ) : ViewModel() {
@@ -49,7 +49,7 @@ class ServiceCatalogViewModel(
     }
 
     val services: StateFlow<List<ConsultancyService>> = combine(
-        repository.observePublishedServices(),
+        repository?.observePublishedServices() ?: flowOf(MilaCatalog.services),
         _supabaseServices
     ) { firestoreList, supabaseList ->
         if (supabaseList.isNotEmpty()) supabaseList else firestoreList
