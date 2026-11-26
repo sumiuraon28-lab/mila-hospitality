@@ -1,10 +1,69 @@
 (() => {
   "use strict";
 
-  // In-memory runtime state only (never persists auth JWT to localStorage/sessionStorage)
+  const PUBLIC_ENDPOINT_STORAGE_KEY = "mila_admin_public_endpoint_v1";
+
+  function normalizeSupabaseUrl(raw) {
+    let u = String(raw || "").trim().replace(/^["']|["']$/g, "").replace(/\/+$/, "");
+    if (u && !/^https?:\/\//i.test(u) && u.includes(".supabase.co")) {
+      u = "https://" + u;
+    }
+    return u;
+  }
+
+  function normalizeSupabaseKey(raw) {
+    return String(raw || "").trim().replace(/^["']|["']$/g, "").replace(/\s+/g, "");
+  }
+
+  function isSecretSupabaseKey(raw) {
+    const k = normalizeSupabaseKey(raw);
+    if (!k) return false;
+    if (k.startsWith("sb_secret_")) return true;
+    // Detect legacy JWT with role=service_role
+    const parts = k.split(".");
+    if (parts.length === 3 && parts[0].startsWith("eyJ")) {
+      try {
+        const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const payload = JSON.parse(atob(b64));
+        if (payload && payload.role === "service_role") return true;
+      } catch {
+        // ignore non-JSON payload
+      }
+    }
+    return false;
+  }
+
+  function loadSavedPublicEndpoint() {
+    try {
+      const raw = window.localStorage.getItem(PUBLIC_ENDPOINT_STORAGE_KEY);
+      if (!raw) return { url: "", key: "" };
+      const parsed = JSON.parse(raw);
+      const url = String(parsed.url || "").trim().replace(/\/+$/, "");
+      const key = String(parsed.key || "").trim();
+      if (!url || !key || isSecretSupabaseKey(key)) return { url: "", key: "" };
+      return { url, key };
+    } catch {
+      return { url: "", key: "" };
+    }
+  }
+
+  function savePublicEndpoint(url, key) {
+    if (!url || !key || isSecretSupabaseKey(key)) return;
+    try {
+      window.localStorage.setItem(PUBLIC_ENDPOINT_STORAGE_KEY, JSON.stringify({ url, key }));
+    } catch {
+      // Ignore storage quota / private mode errors
+    }
+  }
+
+  const savedEndpoint = loadSavedPublicEndpoint();
+  const buildUrl = ((window.MILA_ADMIN_CONFIG && window.MILA_ADMIN_CONFIG.supabaseUrl) || "").trim().replace(/\/+$/, "");
+  const buildKey = ((window.MILA_ADMIN_CONFIG && window.MILA_ADMIN_CONFIG.supabaseAnonKey) || "").trim();
+
+  // In-memory runtime state only (never persists auth JWT or passwords to storage)
   const state = {
-    supabaseUrl: ((window.MILA_ADMIN_CONFIG && window.MILA_ADMIN_CONFIG.supabaseUrl) || "").trim().replace(/\/+$/, ""),
-    supabaseAnonKey: ((window.MILA_ADMIN_CONFIG && window.MILA_ADMIN_CONFIG.supabaseAnonKey) || "").trim(),
+    supabaseUrl: buildUrl || savedEndpoint.url,
+    supabaseAnonKey: (buildKey && !isSecretSupabaseKey(buildKey)) ? buildKey : savedEndpoint.key,
     token: null,
     admin: null,
     activeModule: "overview",
@@ -146,13 +205,20 @@
 
   function updateConnectionBadge() {
     const badge = document.getElementById("connStatusBadge");
-    if (!badge) return;
-    if (isValidSupabaseUrl(state.supabaseUrl) && state.supabaseAnonKey) {
-      badge.textContent = "Connected";
-      badge.className = "pill pill-emerald";
-    } else {
-      badge.textContent = "Setup Required";
-      badge.className = "pill pill-alert";
+    const details = document.getElementById("connectionDetails");
+    const configured = isValidSupabaseUrl(state.supabaseUrl) && Boolean(state.supabaseAnonKey) && !isSecretSupabaseKey(state.supabaseAnonKey);
+    if (badge) {
+      if (configured) {
+        badge.textContent = "Connected";
+        badge.className = "pill pill-emerald";
+      } else {
+        badge.textContent = "Setup Required";
+        badge.className = "pill pill-alert";
+      }
+    }
+    if (details) {
+      // Keep the login screen clean (email + password only) whenever backend is already connected
+      details.classList.toggle("hidden", configured);
     }
   }
 
@@ -331,6 +397,13 @@
       return;
     }
 
+    if (isSecretSupabaseKey(state.supabaseAnonKey)) {
+      document.getElementById("connectionDetails").open = true;
+      errBox.textContent = "You pasted a Secret / service_role key. Please paste the public Publishable (sb_publishable_...) or Legacy anon key (eyJ...) instead.";
+      errBox.classList.remove("hidden");
+      return;
+    }
+
     submitBtn.disabled = true;
     submitBtn.textContent = "Verifying Administrator Access...";
     try {
@@ -347,6 +420,9 @@
         throw new Error((authJson && (authJson.error_description || authJson.msg || authJson.message)) || "Invalid administrator email or password.");
       }
 
+      // Persist only the non-secret public backend URL + publishable/anon key for next visit
+      savePublicEndpoint(state.supabaseUrl, state.supabaseAnonKey);
+
       const token = authJson.access_token;
       const verifyRes = await fetch(state.supabaseUrl + "/rest/v1/rpc/verify_admin_session", {
         method: "POST",
@@ -358,6 +434,9 @@
         body: "{}"
       });
       const verifyJson = await verifyRes.json().catch(() => null);
+      if (verifyRes.status === 404) {
+        throw new Error("MILA database tables/functions are not installed in this Supabase project yet. Run supabase/ALL_IN_ONE_SETUP.sql in your Supabase SQL Editor first.");
+      }
       if (!verifyRes.ok || !verifyJson || verifyJson.authorized !== true || verifyJson.active === false) {
         await fetch(state.supabaseUrl + "/auth/v1/logout", {
           method: "POST",
@@ -388,7 +467,15 @@
       await refreshAllData(false, false);
       startLiveSyncPolling();
     } catch (err) {
-      errBox.textContent = err.message || "Administrator verification failed.";
+      const msg = err.message || "Administrator verification failed.";
+      if (/invalid api key/i.test(msg)) {
+        const details = document.getElementById("connectionDetails");
+        if (details) {
+          details.classList.remove("hidden");
+          details.open = true;
+        }
+      }
+      errBox.textContent = msg;
       errBox.classList.remove("hidden");
     } finally {
       submitBtn.disabled = false;
@@ -2068,8 +2155,10 @@
     }
 
     document.getElementById("saveConnBtn").addEventListener("click", () => {
-      const nextUrl = urlInput.value.trim().replace(/\/+$/, "");
-      const nextKey = keyInput.value.trim();
+      const nextUrl = normalizeSupabaseUrl(urlInput.value);
+      const nextKey = normalizeSupabaseKey(keyInput.value);
+      urlInput.value = nextUrl;
+      keyInput.value = nextKey;
       if (!isValidSupabaseUrl(nextUrl)) {
         showToast("Please enter a valid https:// Supabase Project URL.");
         return;
@@ -2078,21 +2167,29 @@
         showToast("Please enter your Supabase Publishable/Anon Key.");
         return;
       }
+      if (isSecretSupabaseKey(nextKey)) {
+        showToast("Do not use a Secret / service_role key here. Use the public Publishable or Legacy anon key.");
+        return;
+      }
       state.supabaseUrl = nextUrl;
       state.supabaseAnonKey = nextKey;
+      savePublicEndpoint(nextUrl, nextKey);
       updateConnectionBadge();
       document.getElementById("connectionDetails").open = false;
-      showToast("Supabase backend connection applied.");
+      showToast("Connection saved on this device — now just sign in with email & password.");
     });
 
     document.getElementById("loginForm").addEventListener("submit", (e) => {
       e.preventDefault();
-      // Auto-apply connection inputs if admin typed them without clicking Apply
-      const typedUrl = urlInput.value.trim().replace(/\/+$/, "");
-      const typedKey = keyInput.value.trim();
+      // Auto-apply connection inputs if admin typed them without clicking Save
+      const typedUrl = normalizeSupabaseUrl(urlInput.value);
+      const typedKey = normalizeSupabaseKey(keyInput.value);
       if (isValidSupabaseUrl(typedUrl) && typedKey) {
         state.supabaseUrl = typedUrl;
         state.supabaseAnonKey = typedKey;
+        if (!isSecretSupabaseKey(typedKey)) {
+          savePublicEndpoint(typedUrl, typedKey);
+        }
         updateConnectionBadge();
       }
       handleLogin(

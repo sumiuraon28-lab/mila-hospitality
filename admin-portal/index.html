@@ -42,14 +42,14 @@
         <summary>Supabase Backend Connection <span id="connStatusBadge" class="pill pill-muted" style="margin-left:8px;">Check Config</span></summary>
         <div class="field">
           <label for="cfgSupabaseUrl">Supabase Project URL (https://...supabase.co)</label>
-          <input id="cfgSupabaseUrl" type="url" placeholder="https://your-project.supabase.co" />
+          <input id="cfgSupabaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://your-project.supabase.co" />
         </div>
         <div class="field">
-          <label for="cfgSupabaseKey">Supabase Publishable / Anon Key</label>
-          <input id="cfgSupabaseKey" type="password" placeholder="eyJ... or sb_publishable_..." />
+          <label for="cfgSupabaseKey">Supabase Publishable / Anon Key (Public)</label>
+          <input id="cfgSupabaseKey" type="text" autocomplete="off" spellcheck="false" placeholder="eyJ... or sb_publishable_..." />
         </div>
         <button id="saveConnBtn" type="button" class="btn btn-outline btn-sm btn-full">
-          Apply Connection Settings
+          Save Connection on This Device
         </button>
       </details>
 
