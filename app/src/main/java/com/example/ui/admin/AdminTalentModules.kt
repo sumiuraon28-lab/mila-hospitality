@@ -7,12 +7,19 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -21,6 +28,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,7 +44,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.AdminModule
 import com.example.data.AdminUser
 import com.example.data.ApplicationStatus
+import com.example.data.CandidateAvailability
 import com.example.data.CandidateProfile
+import com.example.data.HospitalityDepartment
 import com.example.data.JobApplication
 import com.example.data.JobNotification
 import com.example.data.JobVacancyRecord
@@ -220,11 +230,16 @@ fun AdminVacanciesModule(
 fun AdminCandidatesModule(
     actor: AdminUser,
     candidates: List<CandidateProfile>,
-    onToggleAlerts: (CandidateProfile) -> Unit
+    onUpdateCandidate: (CandidateProfile) -> Unit,
+    onDeleteCandidate: (CandidateProfile) -> Unit,
+    onToggleAlerts: (CandidateProfile) -> Unit,
+    onDownloadCv: (CandidateProfile) -> Unit
 ) {
     val canWrite = actor.resolvedRole.canMutate(AdminModule.CANDIDATE_MANAGEMENT)
     var query by remember { mutableStateOf("") }
     var inspecting by remember { mutableStateOf<CandidateProfile?>(null) }
+    var editing by remember { mutableStateOf<CandidateProfile?>(null) }
+    var deleting by remember { mutableStateOf<CandidateProfile?>(null) }
 
     val filtered = remember(candidates, query) {
         val q = query.trim().lowercase()
@@ -245,7 +260,7 @@ fun AdminCandidatesModule(
         item {
             AdminModuleHeader(
                 module = AdminModule.CANDIDATE_MANAGEMENT,
-                subtitle = "15-field MILA Talent candidate dossiers, experience profiles, and job-alert statuses (${candidates.size}).",
+                subtitle = "15-field MILA Talent candidate dossiers, edit/delete management, and instant CV downloads (${candidates.size}).",
                 isReadOnly = !canWrite
             )
         }
@@ -265,21 +280,45 @@ fun AdminCandidatesModule(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             StatusPill(label = cand.resolvedDepartment.label, tone = StatusTone.GOLD)
                             StatusPill(
-                                label = if (cand.hasCvUploaded) "CV On Vault" else "No CV",
+                                label = if (cand.hasCvUploaded) "CV Ready" else "No CV",
                                 tone = if (cand.hasCvUploaded) StatusTone.EMERALD else StatusTone.MUTED
                             )
                         }
                         Text(cand.fullName, style = MaterialTheme.typography.titleMedium.copy(color = MilaIvory))
                         Text("${cand.currentDesignation} • ${cand.currentEmployer} (${cand.totalExperienceYears} yrs)", style = MaterialTheme.typography.bodySmall.copy(color = MilaChampagneGold))
                         Text("${cand.location} • Expected: ${cand.expectedSalary} • Notice: ${cand.noticePeriod}", style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted))
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            GoldOutlineButton("Inspect Full Dossier", { inspecting = cand }, "inspect_cand_${cand.userId}")
+                        if (cand.hasCvUploaded) {
+                            Text("CV: ${cand.cvFileName}", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GoldOutlineButton("Inspect Dossier", { inspecting = cand }, "inspect_cand_${cand.userId}")
+                            if (cand.hasCvUploaded) {
+                                GoldFilledButton(
+                                    text = "Download CV",
+                                    onClick = { onDownloadCv(cand) },
+                                    testTag = "download_cand_cv_${cand.userId}"
+                                )
+                            }
                             if (canWrite) {
+                                GoldOutlineButton("Edit", { editing = cand }, "edit_cand_${cand.userId}")
                                 GoldOutlineButton(
                                     if (cand.jobAlertsEnabled) "Pause Alerts" else "Enable Alerts",
                                     { onToggleAlerts(cand) },
                                     "alerts_cand_${cand.userId}"
                                 )
+                                TextButton(onClick = { deleting = cand }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = "Delete candidate",
+                                        tint = MilaTerracotta,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Delete", color = MilaTerracotta)
+                                }
                             }
                         }
                     }
@@ -294,35 +333,207 @@ fun AdminCandidatesModule(
             containerColor = MilaCharcoalSurface,
             title = { Text(cand.fullName, color = MilaIvory) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Email: ${cand.email}", color = MilaIvoryMuted)
-                    Text("Mobile: ${cand.mobileNumber}", color = MilaIvoryMuted)
-                    Text("Location: ${cand.location}", color = MilaIvoryMuted)
-                    Text("Designation: ${cand.currentDesignation} (${cand.resolvedDepartment.label})", color = MilaChampagneGold)
-                    Text("Experience: ${cand.totalExperienceYears} yrs", color = MilaIvory)
-                    Text("Current Employer: ${cand.currentEmployer}", color = MilaIvory)
-                    Text("Previous Employers: ${cand.previousEmployers}", color = MilaWarmStone)
-                    Text("Education: ${cand.education}", color = MilaWarmStone)
-                    Text("Skills: ${cand.skills}", color = MilaIvory)
-                    Text("Preferred Locations: ${cand.preferredJobLocations}", color = MilaIvoryMuted)
-                    Text("Salary & Availability: ${cand.expectedSalary} • ${cand.resolvedAvailability.label} • Notice ${cand.noticePeriod}", color = MilaChampagneGold)
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    item { Text("Email: ${cand.email}", color = MilaIvoryMuted) }
+                    item { Text("Mobile: ${cand.mobileNumber}", color = MilaIvoryMuted) }
+                    item { Text("Location: ${cand.location}", color = MilaIvoryMuted) }
+                    item { Text("Designation: ${cand.currentDesignation} (${cand.resolvedDepartment.label})", color = MilaChampagneGold) }
+                    item { Text("Experience: ${cand.totalExperienceYears} yrs", color = MilaIvory) }
+                    item { Text("Current Employer: ${cand.currentEmployer}", color = MilaIvory) }
+                    item { Text("Previous Employers: ${cand.previousEmployers}", color = MilaWarmStone) }
+                    item { Text("Education: ${cand.education}", color = MilaWarmStone) }
+                    item { Text("Skills: ${cand.skills}", color = MilaIvory) }
+                    item { Text("Preferred Locations: ${cand.preferredJobLocations}", color = MilaIvoryMuted) }
+                    item { Text("Salary & Availability: ${cand.expectedSalary} • ${cand.resolvedAvailability.label} • Notice ${cand.noticePeriod}", color = MilaChampagneGold) }
+                    if (cand.hasCvUploaded) {
+                        item {
+                            Text(
+                                "Uploaded CV: ${cand.cvFileName}",
+                                style = MaterialTheme.typography.labelMedium.copy(color = MilaChampagneGold)
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { inspecting = null }) { Text("Close", color = MilaChampagneGold) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (cand.hasCvUploaded) {
+                        GoldFilledButton(
+                            text = "Download CV",
+                            onClick = { onDownloadCv(cand) },
+                            testTag = "inspect_download_cv_${cand.userId}"
+                        )
+                    }
+                    if (canWrite) {
+                        GoldOutlineButton(
+                            text = "Edit",
+                            onClick = {
+                                inspecting = null
+                                editing = cand
+                            },
+                            testTag = "inspect_edit_cand_${cand.userId}"
+                        )
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { inspecting = null }) { Text("Close", color = MilaWarmStone) }
+            }
+        )
+    }
+
+    editing?.let { cand ->
+        var fullName by remember(cand) { mutableStateOf(cand.fullName) }
+        var email by remember(cand) { mutableStateOf(cand.email) }
+        var mobile by remember(cand) { mutableStateOf(cand.mobileNumber) }
+        var location by remember(cand) { mutableStateOf(cand.location) }
+        var designation by remember(cand) { mutableStateOf(cand.currentDesignation) }
+        var department by remember(cand) { mutableStateOf(cand.resolvedDepartment) }
+        var expYears by remember(cand) { mutableStateOf(cand.totalExperienceYears.toString()) }
+        var currentEmployer by remember(cand) { mutableStateOf(cand.currentEmployer) }
+        var previousEmployers by remember(cand) { mutableStateOf(cand.previousEmployers) }
+        var education by remember(cand) { mutableStateOf(cand.education) }
+        var skills by remember(cand) { mutableStateOf(cand.skills) }
+        var preferredLocations by remember(cand) { mutableStateOf(cand.preferredJobLocations) }
+        var expectedSalary by remember(cand) { mutableStateOf(cand.expectedSalary) }
+        var availability by remember(cand) { mutableStateOf(cand.resolvedAvailability) }
+        var noticePeriod by remember(cand) { mutableStateOf(cand.noticePeriod) }
+
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            containerColor = MilaCharcoalSurface,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Edit, contentDescription = null, tint = MilaChampagneGold, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Edit Candidate Dossier", color = MilaIvory)
+                }
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 440.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item { AdminInputField("Full Name", fullName, { fullName = it }) }
+                    item { AdminInputField("Email", email, { email = it }) }
+                    item { AdminInputField("Mobile Number", mobile, { mobile = it }) }
+                    item { AdminInputField("Current City / Location", location, { location = it }) }
+                    item { AdminInputField("Current Designation", designation, { designation = it }) }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("DEPARTMENT", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                HospitalityDepartment.entries.forEach { dept ->
+                                    FilterChip(
+                                        selected = department == dept,
+                                        onClick = { department = dept },
+                                        label = { Text(dept.label) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    item { AdminInputField("Total Experience (Years)", expYears, { expYears = it }) }
+                    item { AdminInputField("Current Employer", currentEmployer, { currentEmployer = it }) }
+                    item { AdminInputField("Previous Employers", previousEmployers, { previousEmployers = it }, minLines = 2) }
+                    item { AdminInputField("Education", education, { education = it }) }
+                    item { AdminInputField("Skills", skills, { skills = it }, minLines = 2) }
+                    item { AdminInputField("Preferred Locations", preferredLocations, { preferredLocations = it }) }
+                    item { AdminInputField("Expected Salary", expectedSalary, { expectedSalary = it }) }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("AVAILABILITY", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                CandidateAvailability.entries.forEach { avail ->
+                                    FilterChip(
+                                        selected = availability == avail,
+                                        onClick = { availability = avail },
+                                        label = { Text(avail.label) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    item { AdminInputField("Notice Period", noticePeriod, { noticePeriod = it }) }
+                }
+            },
+            confirmButton = {
+                GoldFilledButton(
+                    text = "Save Candidate",
+                    onClick = {
+                        onUpdateCandidate(
+                            cand.copy(
+                                fullName = fullName.trim().ifBlank { cand.fullName },
+                                email = email.trim().ifBlank { cand.email },
+                                mobileNumber = mobile.trim().ifBlank { cand.mobileNumber },
+                                location = location.trim(),
+                                currentDesignation = designation.trim(),
+                                department = department.name,
+                                totalExperienceYears = (expYears.toLongOrNull() ?: cand.totalExperienceYears).coerceIn(0L, 60L),
+                                currentEmployer = currentEmployer.trim(),
+                                previousEmployers = previousEmployers.trim(),
+                                education = education.trim(),
+                                skills = skills.trim(),
+                                preferredJobLocations = preferredLocations.trim(),
+                                expectedSalary = expectedSalary.trim(),
+                                availability = availability.name,
+                                noticePeriod = noticePeriod.trim()
+                            )
+                        )
+                        editing = null
+                    },
+                    testTag = "save_edit_candidate_dialog"
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = null }) { Text("Cancel", color = MilaWarmStone) }
+            }
+        )
+    }
+
+    deleting?.let { cand ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = MilaCharcoalSurface,
+            title = { Text("Delete Candidate Profile?", color = MilaIvory) },
+            text = {
+                Text(
+                    "Permanently delete ${cand.fullName}'s candidate record (${cand.currentDesignation})? This action cannot be undone.",
+                    color = MilaIvoryMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteCandidate(cand)
+                        deleting = null
+                    }
+                ) {
+                    Text("Delete Permanently", color = MilaTerracotta)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) { Text("Cancel", color = MilaWarmStone) }
             }
         )
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminCvDatabaseModule(
     actor: AdminUser,
     candidates: List<CandidateProfile>,
+    onDownloadCv: (CandidateProfile) -> Unit,
     onPurgeCv: (CandidateProfile) -> Unit
 ) {
     val canWrite = actor.resolvedRole.canMutate(AdminModule.CV_DATABASE)
     var query by remember { mutableStateOf("") }
+    var purging by remember { mutableStateOf<CandidateProfile?>(null) }
+
     val withCv = remember(candidates, query) {
         val q = query.trim().lowercase()
         candidates.filter { c ->
@@ -341,7 +552,7 @@ fun AdminCvDatabaseModule(
         item {
             AdminModuleHeader(
                 module = AdminModule.CV_DATABASE,
-                subtitle = "Private encrypted CV vault metadata (${withCv.size} indexed). Public download URLs are strictly disabled.",
+                subtitle = "Private encrypted CV vault (${withCv.size} indexed). Authorized MILA admins can securely download any candidate CV directly to Downloads/MILA_CVs or remove records.",
                 isReadOnly = !canWrite
             )
         }
@@ -351,28 +562,72 @@ fun AdminCvDatabaseModule(
         if (withCv.isEmpty()) {
             item { AdminEmptyState("No private candidate CVs stored yet.") }
         } else {
-            items(withCv, key = { it.userId }) { cand ->
+            items(withCv, key = { it.userId + "_" + it.id }) { cand ->
                 val sizeKb = ((cand.cvFileSizeBytes ?: 0L) / 1024L).coerceAtLeast(1L)
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
                     border = BorderStroke(1.dp, MilaGoldSubtle),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StatusPill(label = "PRIVATE VAULT KEY", tone = StatusTone.GOLD)
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatusPill(label = "PRIVATE VAULT CV", tone = StatusTone.GOLD)
                         Text(cand.cvFileName.orEmpty(), style = MaterialTheme.typography.titleMedium.copy(color = MilaIvory))
                         Text("Candidate: ${cand.fullName} • ${cand.currentDesignation}", style = MaterialTheme.typography.bodySmall.copy(color = MilaChampagneGold))
                         Text("MIME: ${cand.cvMimeType ?: "application/pdf"} • Size: $sizeKb KB", style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted))
                         Text("Private Object Key: ${cand.cvStoragePath}", style = MaterialTheme.typography.labelSmall.copy(color = MilaWarmStone))
-                        if (canWrite) {
-                            TextButton(onClick = { onPurgeCv(cand) }) {
-                                Text("Remove CV Record", color = MilaTerracotta)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GoldFilledButton(
+                                text = "Download CV",
+                                onClick = { onDownloadCv(cand) },
+                                testTag = "cv_db_download_${cand.userId}"
+                            )
+                            if (canWrite) {
+                                TextButton(onClick = { purging = cand }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = "Remove CV record",
+                                        tint = MilaTerracotta,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Remove CV Record", color = MilaTerracotta)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    purging?.let { cand ->
+        AlertDialog(
+            onDismissRequest = { purging = null },
+            containerColor = MilaCharcoalSurface,
+            title = { Text("Remove CV Record?", color = MilaIvory) },
+            text = {
+                Text(
+                    "Clear ${cand.cvFileName ?: "the uploaded CV"} from ${cand.fullName}'s profile?",
+                    color = MilaIvoryMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onPurgeCv(cand)
+                        purging = null
+                    }
+                ) {
+                    Text("Remove CV", color = MilaTerracotta)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { purging = null }) { Text("Cancel", color = MilaWarmStone) }
+            }
+        )
     }
 }
 
@@ -382,12 +637,22 @@ fun AdminApplicationsAndStatusModule(
     actor: AdminUser,
     module: AdminModule,
     applications: List<JobApplication>,
+    candidates: List<CandidateProfile>,
     onUpdateStatus: (JobApplication, ApplicationStatus, Boolean) -> Unit,
+    onDownloadCv: (CandidateProfile) -> Unit,
     onDeleteApplication: (JobApplication) -> Unit
 ) {
     val canWrite = actor.resolvedRole.canMutate(module)
     var query by remember { mutableStateOf("") }
     var stageFilter by remember { mutableStateOf("ALL") }
+    var deletingApp by remember { mutableStateOf<JobApplication?>(null) }
+
+    val candidateByUserId = remember(candidates) {
+        candidates.associateBy { it.userId }
+    }
+    val candidateByEmail = remember(candidates) {
+        candidates.associateBy { it.email.trim().lowercase() }
+    }
 
     val filtered = remember(applications, query, stageFilter) {
         val q = query.trim().lowercase()
@@ -410,9 +675,9 @@ fun AdminApplicationsAndStatusModule(
             AdminModuleHeader(
                 module = module,
                 subtitle = if (module == AdminModule.RECRUITMENT_STATUS_MANAGEMENT) {
-                    "Advance candidates across Shortlisted, Interview Scheduled, Offer Extended, and Hired stages with automatic notifications."
+                    "Advance candidates across Shortlisted, Interview Scheduled, Offer Extended, and Hired stages, download CVs, and manage applications."
                 } else {
-                    "Search and review all candidate applications submitted via MILA Talent (${applications.size} total)."
+                    "Search, download candidate CVs, update statuses, or remove applications submitted via MILA Talent (${applications.size} total)."
                 },
                 isReadOnly = !canWrite
             )
@@ -448,6 +713,9 @@ fun AdminApplicationsAndStatusModule(
             item { AdminEmptyState("No job applications match this filter.") }
         } else {
             items(filtered, key = { it.id.ifBlank { it.userId + it.roleId } }) { app ->
+                val matchedCandidate = candidateByUserId[app.userId]
+                    ?: candidateByEmail[app.candidateEmail.trim().lowercase()]
+
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
                     border = BorderStroke(1.dp, MilaGoldSubtle),
@@ -471,6 +739,13 @@ fun AdminApplicationsAndStatusModule(
                         if (!app.cvFileName.isNullOrBlank()) {
                             Text("Attached Private CV: ${app.cvFileName}", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
                         }
+                        if (matchedCandidate != null && matchedCandidate.hasCvUploaded) {
+                            GoldFilledButton(
+                                text = "Download Candidate CV",
+                                onClick = { onDownloadCv(matchedCandidate) },
+                                testTag = "app_download_cv_${app.id}"
+                            )
+                        }
                         if (canWrite) {
                             HorizontalDivider(color = MilaGoldSubtle)
                             Text("UPDATE STAGE & NOTIFY CANDIDATE", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold, letterSpacing = 1.1.sp))
@@ -490,16 +765,48 @@ fun AdminApplicationsAndStatusModule(
                                     )
                                 }
                             }
-                            if (module == AdminModule.JOB_APPLICATIONS) {
-                                TextButton(onClick = { onDeleteApplication(app) }) {
-                                    Text("Delete Application", color = MilaTerracotta)
-                                }
+                            TextButton(onClick = { deletingApp = app }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete,
+                                    contentDescription = "Delete application",
+                                    tint = MilaTerracotta,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("Delete Application", color = MilaTerracotta)
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    deletingApp?.let { app ->
+        AlertDialog(
+            onDismissRequest = { deletingApp = null },
+            containerColor = MilaCharcoalSurface,
+            title = { Text("Delete Application?", color = MilaIvory) },
+            text = {
+                Text(
+                    "Remove ${app.candidateName}'s application for ${app.roleTitle}? This action cannot be undone.",
+                    color = MilaIvoryMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteApplication(app)
+                        deletingApp = null
+                    }
+                ) {
+                    Text("Delete Application", color = MilaTerracotta)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingApp = null }) { Text("Cancel", color = MilaWarmStone) }
+            }
+        )
     }
 }
 

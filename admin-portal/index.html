@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0c0a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="MILA Admin" />
+  <title>MILA Executive Admin Control Center</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Dedicated Standalone Admin Login Screen -->
+  <section id="loginView" class="login-shell">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="crest-badge">M</div>
+        <div class="eyebrow">MILA Executive Console</div>
+        <h1 class="serif">Administrator Sign In</h1>
+        <p>Standalone web command center completely separate from the MILA client mobile app.</p>
+      </div>
+
+      <div id="loginError" class="error-box hidden"></div>
+
+      <form id="loginForm" autocomplete="off">
+        <div class="field">
+          <label for="adminEmail">Administrator Email *</label>
+          <input id="adminEmail" type="email" required placeholder="sumiuraon28@gmail.com" />
+        </div>
+        <div class="field">
+          <label for="adminPassword">Password *</label>
+          <input id="adminPassword" type="password" required placeholder="Enter admin password" />
+        </div>
+        <button id="loginSubmitBtn" type="submit" class="btn btn-gold btn-full">
+          Sign In to Admin Dashboard
+        </button>
+      </form>
+
+      <details id="connectionDetails" class="config-toggle">
+        <summary>Supabase Backend Connection <span id="connStatusBadge" class="pill pill-muted" style="margin-left:8px;">Check Config</span></summary>
+        <div class="field">
+          <label for="cfgSupabaseUrl">Supabase Project URL (https://...supabase.co)</label>
+          <input id="cfgSupabaseUrl" type="url" placeholder="https://your-project.supabase.co" />
+        </div>
+        <div class="field">
+          <label for="cfgSupabaseKey">Supabase Publishable / Anon Key</label>
+          <input id="cfgSupabaseKey" type="password" placeholder="eyJ... or sb_publishable_..." />
+        </div>
+        <button id="saveConnBtn" type="button" class="btn btn-outline btn-sm btn-full">
+          Apply Connection Settings
+        </button>
+      </details>
+
+      <div class="info-box">
+        Protected by server-side RBAC (<code>verify_admin_session</code>). Ordinary client and candidate accounts are blocked automatically.
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Standalone Admin Dashboard -->
+  <section id="dashboardView" class="admin-shell hidden">
+    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-crest">M</div>
+        <div>
+          <div class="eyebrow">MILA Admin</div>
+          <div id="sidebarRoleLabel" style="font-size:12px;color:#c8c1b4;">Super Admin</div>
+        </div>
+      </div>
+      <nav id="sidebarNav" class="sidebar-nav"></nav>
+      <div class="sidebar-footer">
+        <div id="sidebarAdminName" style="color:#f5f2eb;font-weight:600;"></div>
+        <div id="sidebarAdminEmail" style="word-break:break-all;margin-top:2px;"></div>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="mobileMenuBtn" class="btn btn-ghost btn-sm mobile-menu-btn" type="button">Menu</button>
+          <div>
+            <div class="eyebrow">External Admin Control</div>
+            <div id="topbarModuleTitle" style="font-size:14px;font-weight:600;color:#f5f2eb;">Dashboard Overview</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button id="liveSyncBtn" class="btn btn-ghost btn-sm" type="button">Live Sync: ON</button>
+          <button id="refreshBtn" class="btn btn-outline btn-sm" type="button">Refresh Live Data</button>
+          <button id="signOutBtn" class="btn btn-danger btn-sm" type="button">Sign Out</button>
+        </div>
+      </header>
+
+      <main id="moduleContent" class="content"></main>
+    </div>
+  </section>
+
+  <!-- Reusable Modal -->
+  <div id="modalBackdrop" class="modal-backdrop hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3 id="modalTitle">Edit Record</h3>
+        <button id="modalCloseBtn" class="btn btn-ghost btn-sm" type="button">Close</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+      <div id="modalFooter" class="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- Toast Banner -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

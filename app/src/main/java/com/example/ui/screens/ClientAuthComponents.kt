@@ -66,7 +66,7 @@ import com.example.ui.theme.MilaWarmStone
 enum class ClientAuthMode(val label: String) {
     LOGIN("Log In"),
     REGISTER("Create Account"),
-    RESET_PASSWORD("Reset Password")
+    RESET_PASSWORD("Reset")
 }
 
 @Composable
@@ -142,11 +142,7 @@ fun ClientRegistrationForm(
                 style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
             )
             Text(
-                text = if (supabaseConfigured) {
-                    "Complete your hospitality profile below. Once registered, you can immediately explore all services and submit enquiries."
-                } else {
-                    "Complete your hospitality profile below. Email/password registration connects to Supabase Auth once configured in Secrets, or pair with Google below for immediate access."
-                },
+                text = "Complete your hospitality profile below to explore all 8 MILA consultancy services and submit project enquiries.",
                 style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
             )
 
@@ -305,12 +301,10 @@ fun ClientPasswordLoginForm(
                 text = "Log In Securely",
                 style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
             )
-            if (!supabaseConfigured) {
-                Text(
-                    text = "Supabase Auth ready — add SUPABASE_URL and SUPABASE_ANON_KEY in Secrets to enable email/password sign-in, or use Continue with Google below.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
-                )
-            }
+            Text(
+                text = "Access our bespoke hospitality consultancy services, portfolio, and private project enquiries.",
+                style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
+            )
             ClientTextField(
                 value = email,
                 onValueChange = { if (it.length <= 120) email = it },

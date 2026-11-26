@@ -1,5 +1,6 @@
 package com.example.ui.admin
 
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -16,9 +17,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -54,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +68,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.AdminModule
 import com.example.data.AdminUser
+import com.example.data.CandidateProfile
 import com.example.ui.AdminViewModel
 import com.example.ui.components.StatusPill
 import com.example.ui.components.StatusTone
@@ -86,11 +92,15 @@ fun AdminPortalShell(
     onExitToPublicSite: () -> Unit,
     onSignOut: () -> Unit
 ) {
-    BackHandler {
-        onExitToPublicSite()
-    }
-
     val selectedModule by viewModel.selectedModule.collectAsStateWithLifecycle()
+
+    BackHandler {
+        if (selectedModule != AdminModule.DASHBOARD_OVERVIEW) {
+            viewModel.selectModule(AdminModule.DASHBOARD_OVERVIEW)
+        } else {
+            onExitToPublicSite()
+        }
+    }
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
     val feedback by viewModel.feedback.collectAsStateWithLifecycle()
     val analytics by viewModel.analytics.collectAsStateWithLifecycle()
@@ -114,9 +124,25 @@ fun AdminPortalShell(
     val deliveryLogs by viewModel.deliveryLogs.collectAsStateWithLifecycle()
     val deviceTokens by viewModel.deviceTokens.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
+    val handleDownloadCv: (CandidateProfile) -> Unit = { candidate ->
+        viewModel.downloadCandidateCv(context, candidate) { downloaded ->
+            runCatching {
+                val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(downloaded.shareableUri, downloaded.mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(viewIntent, "Open ${downloaded.fileName}").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+            }
+        }
+    }
 
     LaunchedEffect(feedback) {
         if (feedback != null) {
@@ -169,11 +195,12 @@ fun AdminPortalShell(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MilaCharcoalDeep)
+                            .statusBarsPadding()
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -200,7 +227,7 @@ fun AdminPortalShell(
                                 Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        "MILA ADMINISTRATION PORTAL",
+                                        "MILA ADMIN PORTAL",
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             color = MilaChampagneGold,
                                             letterSpacing = 1.4.sp
@@ -208,17 +235,37 @@ fun AdminPortalShell(
                                     )
                                     Text(
                                         "${actor.resolvedRole.displayLabel} • ${selectedModule.title}",
-                                        style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
+                                        style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted),
+                                        maxLines = 1
                                     )
                                 }
                             }
-                            TextButton(
-                                onClick = onExitToPublicSite,
-                                modifier = Modifier.testTag("admin_exit_public_button")
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ExitToApp, null, tint = MilaChampagneGold, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Public Site", color = MilaChampagneGold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { viewModel.refreshData() },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("admin_refresh_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = "Refresh dashboard data",
+                                        tint = MilaChampagneGold
+                                    )
+                                }
+                                TextButton(
+                                    onClick = onSignOut,
+                                    modifier = Modifier.testTag("admin_top_sign_out_button")
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.ExitToApp,
+                                        contentDescription = "Sign out of Admin Portal",
+                                        tint = MilaTerracotta,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Sign Out", color = MilaTerracotta)
+                                }
                             }
                         }
                         if (isBusy) {
@@ -298,11 +345,15 @@ fun AdminPortalShell(
                             AdminModule.CANDIDATE_MANAGEMENT -> AdminCandidatesModule(
                                 actor = actor,
                                 candidates = candidates,
-                                onToggleAlerts = viewModel::toggleCandidateAlerts
+                                onUpdateCandidate = viewModel::updateCandidate,
+                                onDeleteCandidate = viewModel::deleteCandidate,
+                                onToggleAlerts = viewModel::toggleCandidateAlerts,
+                                onDownloadCv = handleDownloadCv
                             )
                             AdminModule.CV_DATABASE -> AdminCvDatabaseModule(
                                 actor = actor,
                                 candidates = candidates,
+                                onDownloadCv = handleDownloadCv,
                                 onPurgeCv = viewModel::clearCandidateCv
                             )
                             AdminModule.JOB_APPLICATIONS, AdminModule.RECRUITMENT_STATUS_MANAGEMENT ->
@@ -310,7 +361,9 @@ fun AdminPortalShell(
                                     actor = actor,
                                     module = selectedModule,
                                     applications = applications,
+                                    candidates = candidates,
                                     onUpdateStatus = { app, st, notify -> viewModel.updateApplicationStatus(app, st, notify) },
+                                    onDownloadCv = handleDownloadCv,
                                     onDeleteApplication = viewModel::deleteApplication
                                 )
                             AdminModule.NOTIFICATION_MANAGEMENT -> AdminNotificationsCenterModule(
@@ -406,6 +459,8 @@ private fun AdminSidebarBody(
     Column(
         modifier = Modifier
             .fillMaxHeight()
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(vertical = 16.dp)
     ) {
@@ -466,11 +521,17 @@ private fun AdminSidebarBody(
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MilaGoldSubtle, modifier = Modifier.padding(horizontal = 16.dp))
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            TextButton(onClick = onExitToPublicSite) {
-                Text("Return to Public MILA Website", color = MilaChampagneGold)
+            TextButton(
+                onClick = onExitToPublicSite,
+                modifier = Modifier.testTag("admin_exit_public_button")
+            ) {
+                Text("Switch to Member App", color = MilaChampagneGold)
             }
-            TextButton(onClick = onSignOut) {
-                Text("Sign Out", color = MilaTerracotta)
+            TextButton(
+                onClick = onSignOut,
+                modifier = Modifier.testTag("admin_drawer_sign_out_button")
+            ) {
+                Text("Sign Out of Admin Portal", color = MilaTerracotta)
             }
             Text(
                 text = actor.email,

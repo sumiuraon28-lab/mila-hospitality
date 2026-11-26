@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.VerifiedUser
@@ -78,20 +80,19 @@ data class DrawerNavEntry(
     val icon: ImageVector
 )
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MilaBrandHeader(
     isSignedIn: Boolean,
     userInitial: String?,
     onMenuClick: () -> Unit,
     onAccountClick: () -> Unit,
-    onBrandLongPress: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
@@ -116,10 +117,6 @@ fun MilaBrandHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = onBrandLongPress
-                    )
                     .testTag("brand_crest_container")
             ) {
                 Image(
@@ -187,12 +184,69 @@ fun MilaBrandHeader(
 }
 
 @Composable
+fun MilaAuthHeader(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("auth_brand_crest_container")
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_launcher_crest_1795637231719),
+                contentDescription = "MILA Hospitality Crest",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .border(1.dp, MilaGoldMuted, MaterialTheme.shapes.small)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.brand_title),
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        color = MilaChampagneGold,
+                        letterSpacing = 1.6.sp,
+                        fontSize = 12.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = stringResource(R.string.brand_tagline),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MilaIvoryMuted,
+                        fontSize = 11.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            StatusPill(
+                label = "MEMBERS",
+                tone = StatusTone.GOLD
+            )
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        HorizontalDivider(thickness = 0.75.dp, color = MilaGoldSubtle)
+    }
+}
+
+@Composable
 fun MilaDrawerSheetContent(
     entries: List<DrawerNavEntry>,
     currentRoute: String,
     onSelectRoute: (String) -> Unit,
-    verifiedAdmin: AdminUser? = null,
-    onEnterAdminPortal: (() -> Unit)? = null
+    onSignOut: (() -> Unit)? = null
 ) {
     ModalDrawerSheet(
         drawerContainerColor = MilaCharcoalDeep,
@@ -282,41 +336,34 @@ fun MilaDrawerSheetContent(
                 Spacer(modifier = Modifier.height(6.dp))
             }
 
-            if (verifiedAdmin != null && onEnterAdminPortal != null) {
-                Spacer(modifier = Modifier.height(8.dp))
+            if (onSignOut != null) {
+                Spacer(modifier = Modifier.height(10.dp))
                 HorizontalDivider(color = MilaGoldSubtle, modifier = Modifier.padding(horizontal = 20.dp))
-                Text(
-                    text = "VERIFIED STAFF CONSOLE",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = MilaChampagneGold,
-                        letterSpacing = 1.5.sp
-                    ),
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-                )
+                Spacer(modifier = Modifier.height(6.dp))
                 NavigationDrawerItem(
                     label = {
                         Text(
-                            text = "MILA Admin Portal (${verifiedAdmin.resolvedRole.displayLabel})",
+                            text = "Sign Out",
                             style = MaterialTheme.typography.titleSmall
                         )
                     },
                     selected = false,
-                    onClick = onEnterAdminPortal,
+                    onClick = onSignOut,
                     icon = {
                         Icon(
-                            imageVector = Icons.Rounded.AdminPanelSettings,
-                            contentDescription = "Open MILA Admin Portal",
+                            imageVector = Icons.AutoMirrored.Rounded.Logout,
+                            contentDescription = "Sign Out",
                             modifier = Modifier.size(20.dp)
                         )
                     },
                     colors = NavigationDrawerItemDefaults.colors(
-                        unselectedContainerColor = MilaCharcoalElevated,
-                        unselectedIconColor = MilaChampagneGold,
-                        unselectedTextColor = MilaChampagneGold
+                        unselectedContainerColor = Color.Transparent,
+                        unselectedIconColor = MilaTerracotta,
+                        unselectedTextColor = MilaTerracotta
                     ),
                     modifier = Modifier
                         .padding(horizontal = 12.dp, vertical = 2.dp)
-                        .testTag("drawer_enter_admin_portal")
+                        .testTag("drawer_sign_out")
                 )
             }
         }

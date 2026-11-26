@@ -1,0 +1,66 @@
+name: Deploy Standalone MILA Admin Portal
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+    inputs:
+      supabase_url:
+        description: "Optional Supabase Project URL (overrides SUPABASE_URL secret)"
+        required: false
+        type: string
+      supabase_anon_key:
+        description: "Optional Supabase Publishable/Anon Key (overrides SUPABASE_ANON_KEY secret)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "mila-admin-pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy-admin-portal:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Inject Supabase Public Config from Repository Secrets
+        env:
+          INPUT_SUPABASE_URL: ${{ inputs.supabase_url }}
+          INPUT_SUPABASE_ANON_KEY: ${{ inputs.supabase_anon_key }}
+          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cfg = {
+              supabaseUrl: (process.env.INPUT_SUPABASE_URL || process.env.SECRET_SUPABASE_URL || "").trim(),
+              supabaseAnonKey: (process.env.INPUT_SUPABASE_ANON_KEY || process.env.SECRET_SUPABASE_ANON_KEY || "").trim()
+            };
+            fs.writeFileSync("admin-portal/config.js", "window.MILA_ADMIN_CONFIG = " + JSON.stringify(cfg, null, 2) + ";\n");
+            fs.writeFileSync("admin-portal/.nojekyll", "");
+          '
+
+      - name: Upload Admin Portal static bundle
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: admin-portal
+
+      - name: Deploy Standalone Admin Portal to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

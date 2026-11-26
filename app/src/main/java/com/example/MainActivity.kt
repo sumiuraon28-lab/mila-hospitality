@@ -84,10 +84,6 @@ import com.example.auth.attemptAutoSignIn
 import com.example.auth.authStateFlow
 import com.example.auth.firebaseAuthOrNull
 import com.example.auth.signOut
-import com.example.data.AdminCmsRepository
-import com.example.data.AdminRepository
-import com.example.data.AdminSessionState
-import com.example.data.AdminUser
 import com.example.data.CaseStudy
 import com.example.data.ClientProfile
 import com.example.data.ConsultancyService
@@ -100,14 +96,10 @@ import com.example.data.PublicCmsRepository
 import com.example.data.ServiceCatalogRepository
 import com.example.data.Testimonial
 import com.example.notifications.MilaNotificationChannels
-import com.example.notifications.NotificationDispatchRepository
 import com.example.notifications.PushTokenManager
-import com.example.ui.AdminViewModel
 import com.example.ui.MandatesViewModel
 import com.example.ui.ServiceCatalogViewModel
 import com.example.ui.UiState
-import com.example.ui.admin.AdminPortalShell
-import com.example.ui.admin.AdminStaffGateDialog
 import com.example.ui.components.ConsultationRequestSheet
 import com.example.ui.components.DrawerNavEntry
 import com.example.ui.components.JobApplicationSheet
@@ -121,6 +113,7 @@ import com.example.ui.screens.ContactUsScreen
 import com.example.ui.screens.EnquiryConfirmationDialog
 import com.example.ui.screens.IndustriesWeServeScreen
 import com.example.ui.screens.JobSeekerLoginScreen
+import com.example.ui.screens.MilaAuthEntryScreen
 import com.example.ui.screens.OurExpertiseScreen
 import com.example.ui.screens.OurPortfolioScreen
 import com.example.ui.screens.ServiceDetailScreen
@@ -252,50 +245,20 @@ fun MilaAppRoot() {
     val portfolio by catalogViewModel.portfolio.collectAsStateWithLifecycle()
     val testimonials by catalogViewModel.testimonials.collectAsStateWithLifecycle()
 
-    val adminViewModel: AdminViewModel = viewModel(
-        factory = viewModelFactory {
-            initializer {
-                val app = checkNotNull(this[APPLICATION_KEY])
-                val db = firestoreOrNull(app)
-                val adminRepo = db?.let { AdminRepository(it) }
-                AdminViewModel(
-                    adminRepository = adminRepo,
-                    cmsRepository = if (db != null && adminRepo != null) AdminCmsRepository(db, adminRepo) else null,
-                    notificationRepository = if (db != null && adminRepo != null) NotificationDispatchRepository(db, adminRepo) else null
-                )
-            }
-        }
-    )
-    val adminSessionState by adminViewModel.sessionState.collectAsStateWithLifecycle()
+    val isAuthenticated = currentUser != null || supabaseSession != null || supabaseCandidateSession != null
 
-    var inAdminPortal by remember { mutableStateOf(false) }
-    var showAdminGateDialog by remember { mutableStateOf(false) }
-    var adminGateError by remember { mutableStateOf<String?>(null) }
-    var isSupabaseAdminVerifying by remember { mutableStateOf(false) }
-
-    LaunchedEffect(currentUser?.uid) {
-        adminViewModel.verifyUserAccess(currentUser)
-    }
-    LaunchedEffect(adminSessionState) {
-        if (adminSessionState !is AdminSessionState.Authorized) {
-            inAdminPortal = false
+    val handleMemberSignOut: () -> Unit = {
+        scope.launch {
+            supabaseAuthClient.signOut()
+            supabaseTalentClient.signOut()
         }
+        signOut(credentialManager = credentialManager, scope = scope) {}
     }
 
-    val authorizedAdmin = (adminSessionState as? AdminSessionState.Authorized)?.adminUser
-
-    if (inAdminPortal && authorizedAdmin != null) {
-        AdminPortalShell(
-            actor = authorizedAdmin,
-            viewModel = adminViewModel,
-            onExitToPublicSite = { inAdminPortal = false },
-            onSignOut = {
-                adminViewModel.clearSupabaseAdminSession()
-                scope.launch { supabaseAuthClient.signOut() }
-                signOut(credentialManager = credentialManager, scope = scope) {
-                    inAdminPortal = false
-                }
-            }
+    if (!isAuthenticated) {
+        MilaAuthEntryScreen(
+            supabaseAuthClient = supabaseAuthClient,
+            supabaseTalentClient = supabaseTalentClient
         )
     } else {
         val user = currentUser
@@ -352,9 +315,7 @@ fun MilaAppRoot() {
                     vacancies = vacancies,
                     portfolio = portfolio,
                     testimonials = testimonials,
-                    verifiedAdmin = authorizedAdmin,
-                    onBrandLongPress = { showAdminGateDialog = true },
-                    onEnterAdminPortal = { inAdminPortal = true },
+                    onSignOut = handleMemberSignOut,
                     mandatesViewModel = mandatesViewModel
                 )
             }
@@ -369,51 +330,10 @@ fun MilaAppRoot() {
                 vacancies = vacancies,
                 portfolio = portfolio,
                 testimonials = testimonials,
-                verifiedAdmin = authorizedAdmin,
-                onBrandLongPress = { showAdminGateDialog = true },
-                onEnterAdminPortal = { if (authorizedAdmin != null) inAdminPortal = true },
+                onSignOut = handleMemberSignOut,
                 mandatesViewModel = null
             )
         }
-    }
-
-    if (showAdminGateDialog) {
-        AdminStaffGateDialog(
-            currentUser = currentUser,
-            adminSessionState = adminSessionState,
-            onRetryVerify = {
-                adminGateError = null
-                adminViewModel.verifyUserAccess(firebaseAuth?.currentUser, forceRefresh = true)
-            },
-            onEnterPortal = {
-                showAdminGateDialog = false
-                inAdminPortal = true
-            },
-            onAuthError = { msg -> adminGateError = msg },
-            onDismiss = {
-                adminGateError = null
-                showAdminGateDialog = false
-            },
-            authError = adminGateError,
-            supabaseConfigured = supabaseAuthClient.isConfigured(),
-            isSupabaseVerifying = isSupabaseAdminVerifying,
-            onSupabaseAdminLogin = { email, password ->
-                scope.launch {
-                    adminGateError = null
-                    isSupabaseAdminVerifying = true
-                    val verification = supabaseAuthClient.signInAdminAndVerify(email, password)
-                    isSupabaseAdminVerifying = false
-                    verification.fold(
-                        onSuccess = { verifiedStaff ->
-                            adminViewModel.authorizeVerifiedSupabaseAdmin(verifiedStaff)
-                        },
-                        onFailure = { err ->
-                            adminGateError = err.localizedMessage ?: "Admin verification failed."
-                        }
-                    )
-                }
-            }
-        )
     }
 }
 
@@ -429,9 +349,7 @@ private fun MilaAppShell(
     vacancies: List<HospitalityRole>,
     portfolio: List<CaseStudy>,
     testimonials: List<Testimonial>,
-    verifiedAdmin: AdminUser?,
-    onBrandLongPress: () -> Unit,
-    onEnterAdminPortal: () -> Unit,
+    onSignOut: () -> Unit,
     mandatesViewModel: MandatesViewModel?
 ) {
     val context = LocalContext.current
@@ -535,13 +453,10 @@ private fun MilaAppShell(
                     scope.launch { drawerState.close() }
                     navigateToRoute(route)
                 },
-                verifiedAdmin = verifiedAdmin,
-                onEnterAdminPortal = if (verifiedAdmin != null) {
-                    {
-                        scope.launch { drawerState.close() }
-                        onEnterAdminPortal()
-                    }
-                } else null
+                onSignOut = {
+                    scope.launch { drawerState.close() }
+                    onSignOut()
+                }
             )
         }
     ) {
@@ -566,8 +481,13 @@ private fun MilaAppShell(
                         isSignedIn = isClientSignedIn,
                         userInitial = userInitial,
                         onMenuClick = { scope.launch { drawerState.open() } },
-                        onAccountClick = { navigateToRoute(ROUTE_CLIENT_LOGIN) },
-                        onBrandLongPress = onBrandLongPress
+                        onAccountClick = {
+                            if (supabaseCandidateSession != null && supabaseSession == null) {
+                                navigateToRoute(ROUTE_JOB_SEEKER_LOGIN)
+                            } else {
+                                navigateToRoute(ROUTE_CLIENT_LOGIN)
+                            }
+                        }
                     )
                 },
                 bottomBar = {

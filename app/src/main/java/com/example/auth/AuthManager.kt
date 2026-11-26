@@ -196,12 +196,24 @@ fun GoogleSignInButton(
     onAuthSuccess: () -> Unit,
     onAuthError: (String) -> Unit,
     modifier: Modifier = Modifier,
-    label: String = stringResource(R.string.sign_in_google)
+    label: String = stringResource(R.string.sign_in_google),
+    outlined: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
+
+    val containerColor = if (outlined) {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    val contentColor = if (outlined) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onPrimary
+    }
 
     Button(
         onClick = {
@@ -223,8 +235,8 @@ fun GoogleSignInButton(
         },
         enabled = !isLoading,
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
+            containerColor = containerColor,
+            contentColor = contentColor
         ),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
         shape = MaterialTheme.shapes.small,
@@ -236,7 +248,7 @@ fun GoogleSignInButton(
         if (isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.size(20.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
+                color = contentColor,
                 strokeWidth = 2.dp
             )
         } else {
@@ -247,6 +259,7 @@ fun GoogleSignInButton(
                 Icon(
                     imageVector = Icons.Rounded.AccountCircle,
                     contentDescription = null,
+                    tint = if (outlined) MaterialTheme.colorScheme.primary else contentColor,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))

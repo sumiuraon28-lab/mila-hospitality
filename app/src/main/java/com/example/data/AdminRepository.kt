@@ -302,6 +302,36 @@ class AdminRepository(
             logActivity(actor, AdminModule.JOB_APPLICATIONS, "DELETE", application.id, "Removed application for ${application.candidateName}")
         }
 
+    suspend fun updateCandidateProfileAdmin(actor: AdminUser, candidate: CandidateProfile): Result<Unit> =
+        runAdminWrite("users/${candidate.userId}/candidateProfiles/${candidate.id}") {
+            require(actor.resolvedRole.canMutate(AdminModule.CANDIDATE_MANAGEMENT)) { "Not authorized." }
+            db.collection("users").document(candidate.userId)
+                .collection("candidateProfiles").document(candidate.id.ifBlank { "primary" })
+                .update(candidate.toUpdateMap()).await()
+            logActivity(
+                actor,
+                AdminModule.CANDIDATE_MANAGEMENT,
+                "UPDATE",
+                candidate.userId,
+                "Updated candidate profile for ${candidate.fullName}"
+            )
+        }
+
+    suspend fun deleteCandidateProfileAdmin(actor: AdminUser, candidate: CandidateProfile): Result<Unit> =
+        runAdminWrite("users/${candidate.userId}/candidateProfiles/${candidate.id}") {
+            require(actor.resolvedRole.canMutate(AdminModule.CANDIDATE_MANAGEMENT)) { "Not authorized." }
+            db.collection("users").document(candidate.userId)
+                .collection("candidateProfiles").document(candidate.id.ifBlank { "primary" })
+                .delete().await()
+            logActivity(
+                actor,
+                AdminModule.CANDIDATE_MANAGEMENT,
+                "DELETE",
+                candidate.userId,
+                "Deleted candidate profile for ${candidate.fullName}"
+            )
+        }
+
     suspend fun toggleCandidateAlertsAdmin(actor: AdminUser, candidate: CandidateProfile): Result<Unit> =
         runAdminWrite("users/${candidate.userId}/candidateProfiles/${candidate.id}") {
             require(actor.resolvedRole.canMutate(AdminModule.CANDIDATE_MANAGEMENT)) { "Not authorized." }

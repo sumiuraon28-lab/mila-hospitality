@@ -59,8 +59,8 @@ import com.example.ui.theme.MilaWarmStone
 
 enum class JobSeekerAuthMode(val label: String) {
     LOGIN("Log In"),
-    REGISTER("Register Profile"),
-    RESET_PASSWORD("Reset Password")
+    REGISTER("Register"),
+    RESET_PASSWORD("Reset")
 }
 
 val noticePeriodOptions = listOf(
@@ -138,12 +138,10 @@ fun JobSeekerPasswordLoginForm(
                 text = "Sign In to Your Career Dossier",
                 style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
             )
-            if (!supabaseConfigured) {
-                Text(
-                    text = "Supabase Auth & Storage ready — enter SUPABASE_URL and SUPABASE_ANON_KEY in Secrets to enable email login, or sign in instantly with Google below.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
-                )
-            }
+            Text(
+                text = "Access leadership vacancies across India's finest hotels, resorts, and fine-dining destinations.",
+                style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
+            )
             CandidateTextField(
                 value = email,
                 onValueChange = { if (it.length <= 120) email = it },
@@ -234,11 +232,7 @@ fun JobSeekerRegistrationForm(
                 style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
             )
             Text(
-                text = if (supabaseConfigured) {
-                    "Complete your 15-point executive hospitality profile to activate job alerts, upload your private CV, and apply to mandates."
-                } else {
-                    "Complete your 15-point hospitality profile below, then activate immediately with Google Sign-In or Supabase credentials."
-                },
+                text = "Complete your executive hospitality profile to unlock bespoke career mandates, private CV storage, and live alerts.",
                 style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
             )
 

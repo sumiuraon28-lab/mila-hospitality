@@ -7,6 +7,7 @@ import com.example.data.ClientProfile
 import com.example.data.ConsultationInquiry
 import com.example.data.EnquiryConfirmation
 import com.example.data.InquiryStatus
+import com.example.data.SupabaseAdminSession
 import com.example.data.SupabaseConfig
 import com.example.data.SupabaseDatabaseClient
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +49,13 @@ data class SupabaseSession(
     val userId: String,
     val email: String,
     val metadata: SupabaseClientMetadata
+)
+
+data class VerifiedPhoneOtpSession(
+    val phone: String,
+    val accessToken: String,
+    val refreshToken: String,
+    val userId: String
 )
 
 sealed interface ClientAuthOutcome {
@@ -122,6 +130,32 @@ object SupabaseAuthValidator {
             else -> null
         }
     }
+
+    fun normalizePhoneE164(rawInput: String): String? {
+        val cleaned = rawInput.trim().replace(Regex("[\\s\\-()]"), "")
+        if (cleaned.isEmpty()) return null
+        val normalized = when {
+            cleaned.startsWith("+") -> cleaned
+            cleaned.length == 10 && cleaned.all { it.isDigit() } -> "+91$cleaned"
+            cleaned.length in 11..15 && cleaned.all { it.isDigit() } -> "+$cleaned"
+            else -> return null
+        }
+        val digits = normalized.removePrefix("+")
+        return if (digits.length in 10..15 && digits.all { it.isDigit() }) normalized else null
+    }
+
+    fun validateQuickMilaRegistration(
+        fullName: String,
+        email: String,
+        password: String
+    ): String? {
+        return when {
+            fullName.trim().length < 2 -> "Please enter your full name."
+            !emailRegex.matches(email.trim()) -> "Please enter a valid email address."
+            password.length < 6 -> "Password must be at least 6 characters."
+            else -> null
+        }
+    }
 }
 
 class SupabaseAuthClient(
@@ -151,6 +185,269 @@ class SupabaseAuthClient(
 
     fun clearPendingDraftProfile() {
         _pendingDraftProfile.value = null
+    }
+
+    suspend fun sendPhoneOtp(rawPhone: String): Result<String> {
+        val normalizedPhone = SupabaseAuthValidator.normalizePhoneE164(rawPhone)
+            ?: return Result.failure(IllegalArgumentException("Please enter a valid 10-digit mobile number."))
+
+        if (!isConfigured()) {
+            return Result.failure(
+                IllegalStateException("Mobile OTP service is not configured yet. Please check your Supabase settings.")
+            )
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("phone", normalizedPhone)
+                    put("create_user", true)
+                }
+                val httpRequest = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/otp")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = parseJsonOrNull(bodyText)
+                    if (!response.isSuccessful) {
+                        val rawMsg = extractErrorMessage(json, "Could not send OTP (HTTP ${response.code}).")
+                        val friendlyMsg = if (
+                            rawMsg.contains("provider", ignoreCase = true) ||
+                            rawMsg.contains("sms", ignoreCase = true) ||
+                            rawMsg.contains("phone logins are disabled", ignoreCase = true) ||
+                            rawMsg.contains("unsupported", ignoreCase = true)
+                        ) {
+                            "SMS OTP provider is not enabled on Supabase yet. Please use Email & Password to sign in or register right away."
+                        } else {
+                            rawMsg
+                        }
+                        Result.failure(IllegalStateException(friendlyMsg))
+                    } else {
+                        Result.success(normalizedPhone)
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure(IllegalStateException(e.localizedMessage ?: "Network error while sending OTP."))
+            }
+        }
+    }
+
+    suspend fun verifyPhoneOtp(phone: String, otpCode: String): Result<VerifiedPhoneOtpSession> {
+        val normalizedPhone = SupabaseAuthValidator.normalizePhoneE164(phone)
+            ?: return Result.failure(IllegalArgumentException("Invalid mobile number."))
+        val cleanOtp = otpCode.trim()
+        if (cleanOtp.length < 4 || !cleanOtp.all { it.isDigit() }) {
+            return Result.failure(IllegalArgumentException("Please enter the 6-digit OTP sent to your mobile."))
+        }
+
+        if (!isConfigured()) {
+            return Result.failure(
+                IllegalStateException("Mobile OTP verification is not configured yet.")
+            )
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("phone", normalizedPhone)
+                    put("token", cleanOtp)
+                    put("type", "sms")
+                }
+                val httpRequest = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/verify")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = parseJsonOrNull(bodyText)
+                    if (!response.isSuccessful || json == null) {
+                        val msg = extractErrorMessage(json, "Invalid or expired OTP. Please try again.")
+                        return@withContext Result.failure(IllegalStateException(msg))
+                    }
+                    val accessToken = json.optString("access_token").orEmpty()
+                    val refreshToken = json.optString("refresh_token").orEmpty()
+                    val userId = json.optJSONObject("user")?.optString("id").orEmpty()
+                    if (accessToken.isBlank() || userId.isBlank()) {
+                        return@withContext Result.failure(
+                            IllegalStateException("OTP verification did not return a valid session.")
+                        )
+                    }
+                    Result.success(
+                        VerifiedPhoneOtpSession(
+                            phone = normalizedPhone,
+                            accessToken = accessToken,
+                            refreshToken = refreshToken,
+                            userId = userId
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Result.failure(IllegalStateException(e.localizedMessage ?: "Network error while verifying OTP."))
+            }
+        }
+    }
+
+    suspend fun completeMilaAccountAfterOtp(
+        verifiedPhone: VerifiedPhoneOtpSession,
+        fullName: String,
+        email: String,
+        password: String,
+        updatesOptIn: Boolean
+    ): ClientAuthOutcome {
+        SupabaseAuthValidator.validateQuickMilaRegistration(fullName, email, password)?.let { err ->
+            return ClientAuthOutcome.Failure(err)
+        }
+
+        val metadata = SupabaseClientMetadata(
+            fullName = fullName.trim(),
+            email = email.trim(),
+            mobileNumber = verifiedPhone.phone,
+            companyName = "MILA Hospitality Member",
+            designation = "Hospitality Member",
+            city = "India",
+            businessCategory = BusinessCategory.LUXURY_HOTEL_RESORT
+        )
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val dataJson = metadata.toJson().apply {
+                    put("updates_opt_in", updatesOptIn)
+                }
+                val payload = JSONObject().apply {
+                    put("email", metadata.email)
+                    put("password", password)
+                    put("data", dataJson)
+                }
+                val httpRequest = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/user")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Authorization", "Bearer ${verifiedPhone.accessToken}")
+                    .addHeader("Content-Type", "application/json")
+                    .put(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = parseJsonOrNull(bodyText)
+                    if (!response.isSuccessful) {
+                        val msg = extractErrorMessage(json, "Could not complete registration (HTTP ${response.code}).")
+                        return@withContext ClientAuthOutcome.Failure(msg)
+                    }
+                    val activeSession = SupabaseSession(
+                        accessToken = verifiedPhone.accessToken,
+                        refreshToken = verifiedPhone.refreshToken,
+                        userId = verifiedPhone.userId,
+                        email = metadata.email,
+                        metadata = metadata
+                    )
+                    _session.value = activeSession
+                    _pendingDraftProfile.value = metadata
+                    syncClientTables(activeSession, metadata)
+                    refreshClientEnquiries()
+                    ClientAuthOutcome.Authenticated(
+                        session = activeSession,
+                        message = "Welcome to MILA Hospitality, ${metadata.fullName}."
+                    )
+                }
+            } catch (e: Exception) {
+                ClientAuthOutcome.Failure(e.localizedMessage ?: "Network error while creating your MILA account.")
+            }
+        }
+    }
+
+    suspend fun quickEmailSignUp(
+        fullName: String,
+        email: String,
+        mobileNumber: String,
+        password: String,
+        updatesOptIn: Boolean
+    ): ClientAuthOutcome {
+        SupabaseAuthValidator.validateQuickMilaRegistration(fullName, email, password)?.let { err ->
+            return ClientAuthOutcome.Failure(err)
+        }
+
+        val cleanedMobile = mobileNumber.trim()
+        val resolvedMobile = if (cleanedMobile.isEmpty()) {
+            "Not Provided"
+        } else {
+            SupabaseAuthValidator.normalizePhoneE164(cleanedMobile)
+                ?: return ClientAuthOutcome.Failure("Please enter a valid 10-digit mobile number or leave it blank.")
+        }
+
+        val metadata = SupabaseClientMetadata(
+            fullName = fullName.trim(),
+            email = email.trim(),
+            mobileNumber = resolvedMobile,
+            companyName = "MILA Hospitality Member",
+            designation = "Hospitality Member",
+            city = "India",
+            businessCategory = BusinessCategory.LUXURY_HOTEL_RESORT
+        )
+
+        if (!isConfigured()) {
+            _pendingDraftProfile.value = metadata
+            return ClientAuthOutcome.RequiresGoogleSyncOrSecrets(
+                message = "Email registration requires Supabase configuration. Use Continue with Google below or configure SUPABASE_URL and SUPABASE_ANON_KEY.",
+                draftProfile = metadata
+            )
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val dataJson = metadata.toJson().apply {
+                    put("updates_opt_in", updatesOptIn)
+                }
+                val payload = JSONObject().apply {
+                    put("email", metadata.email)
+                    put("password", password)
+                    put("data", dataJson)
+                }
+                val httpRequest = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/signup")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = parseJsonOrNull(bodyText)
+                    if (!response.isSuccessful) {
+                        val msg = extractErrorMessage(json, "Could not create account (HTTP ${response.code}).")
+                        return@withContext ClientAuthOutcome.Failure(msg)
+                    }
+
+                    val accessToken = json?.optString("access_token").orEmpty()
+                    if (accessToken.isNotBlank()) {
+                        val parsedSession = parseSession(json!!, fallbackMetadata = metadata)
+                        _session.value = parsedSession
+                        _pendingDraftProfile.value = metadata
+                        syncClientTables(parsedSession, metadata)
+                        refreshClientEnquiries()
+                        ClientAuthOutcome.Authenticated(
+                            session = parsedSession,
+                            message = "Welcome to MILA Hospitality, ${metadata.fullName}."
+                        )
+                    } else {
+                        _pendingDraftProfile.value = metadata
+                        ClientAuthOutcome.PendingEmailVerification(
+                            email = metadata.email,
+                            message = "Account created for ${metadata.email}. Please verify the link sent to your inbox, then sign in.",
+                            draftProfile = metadata
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                ClientAuthOutcome.Failure(e.localizedMessage ?: "Network error while creating your MILA account.")
+            }
+        }
     }
 
     suspend fun signUp(request: ClientRegistrationRequest): ClientAuthOutcome {
@@ -269,6 +566,8 @@ class SupabaseAuthClient(
                                 businessCategory = remoteProfile.resolvedBusinessCategory
                             )
                         )
+                    } else {
+                        syncClientTables(parsedSession, parsedSession.metadata)
                     }
                     _session.value = parsedSession
                     _pendingDraftProfile.value = parsedSession.metadata
@@ -386,6 +685,15 @@ class SupabaseAuthClient(
         if (!isConfigured()) {
             return Result.failure(IllegalStateException("Supabase credentials are not configured in Secrets."))
         }
+        // Guarantee user_profiles & client_profiles rows exist before inserting into service_enquiries
+        val syncedMeta = current.metadata.copy(
+            fullName = inquiry.contactName.trim().ifBlank { current.metadata.fullName },
+            email = inquiry.contactEmail.trim().ifBlank { current.email },
+            mobileNumber = inquiry.contactPhone.trim().ifBlank { current.metadata.mobileNumber },
+            companyName = inquiry.propertyName.trim().ifBlank { current.metadata.companyName },
+            city = inquiry.city.trim().ifBlank { current.metadata.city }
+        )
+        syncClientTables(current, syncedMeta)
         return dbClient.createServiceEnquiry(current.accessToken, current.userId, inquiry).map { refCode ->
             refreshClientEnquiries()
             EnquiryConfirmation(
@@ -423,14 +731,17 @@ class SupabaseAuthClient(
 
     /**
      * Authenticates a staff member via Supabase Auth and runs server-side RBAC verification
-     * (`POST /rest/v1/rpc/verify_admin_session`). Ordinary users are strictly rejected.
+     * (`POST /rest/v1/rpc/verify_admin_session`), returning a completely isolated
+     * [SupabaseAdminSession] (does not touch the client/member session state).
      */
-    suspend fun signInAdminAndVerify(email: String, password: String): Result<AdminUser> {
+    suspend fun signInAdminWithSession(email: String, password: String): Result<SupabaseAdminSession> {
         SupabaseAuthValidator.validateLogin(email, password)?.let { err ->
             return Result.failure(IllegalArgumentException(err))
         }
         if (!isConfigured()) {
-            return Result.failure(IllegalStateException("Configure SUPABASE_URL and SUPABASE_ANON_KEY in Secrets to enable Supabase staff verification."))
+            return Result.failure(
+                IllegalStateException("Staff sign-in requires cloud configuration. Please check your connection or contact MILA IT.")
+            )
         }
         return withContext(Dispatchers.IO) {
             try {
@@ -448,24 +759,48 @@ class SupabaseAuthClient(
                     val json = parseJsonOrNull(res.body?.string().orEmpty())
                     if (!res.isSuccessful || json == null) {
                         return@withContext Result.failure(
-                            IllegalStateException(extractErrorMessage(json, "Invalid staff credentials."))
+                            IllegalStateException(extractErrorMessage(json, "Invalid administrator email or password."))
                         )
                     }
                     val token = json.optString("access_token")
                     if (token.isBlank()) {
-                        return@withContext Result.failure(IllegalStateException("Missing session token."))
+                        return@withContext Result.failure(IllegalStateException("Missing staff session token."))
                     }
                     val verified = dbClient.verifyAdminSessionServerSide(token).getOrElse { err ->
+                        signOutAdminToken(token)
                         return@withContext Result.failure(err)
                     }
                     if (verified == null || !verified.active) {
-                        Result.failure(IllegalAccessException("Account is not authorised as a MILA administrator."))
+                        signOutAdminToken(token)
+                        Result.failure(
+                            IllegalAccessException("This account is not authorised as a MILA administrator. Ordinary client and candidate accounts cannot access the Admin Portal.")
+                        )
                     } else {
-                        Result.success(verified)
+                        Result.success(SupabaseAdminSession(admin = verified, accessToken = token))
                     }
                 }
             } catch (e: Exception) {
                 Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun signInAdminAndVerify(email: String, password: String): Result<AdminUser> =
+        signInAdminWithSession(email, password).map { it.admin }
+
+    suspend fun signOutAdminToken(accessToken: String?) {
+        if (accessToken.isNullOrBlank() || !isConfigured()) return
+        withContext(Dispatchers.IO) {
+            try {
+                val httpRequest = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/logout")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Authorization", "Bearer $accessToken")
+                    .post("{}".toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                httpClient.newCall(httpRequest).execute().close()
+            } catch (_: Exception) {
+                // Best-effort remote token revocation.
             }
         }
     }
@@ -494,12 +829,20 @@ class SupabaseAuthClient(
 
     private suspend fun syncClientTables(session: SupabaseSession, metadata: SupabaseClientMetadata) {
         if (!isConfigured() || session.userId.isBlank()) return
+        val safeEmail = metadata.email.trim().ifBlank { session.email.trim() }
+        val safeName = metadata.fullName.trim().takeIf { it.length >= 2 }
+            ?: safeEmail.substringBefore("@").takeIf { it.length >= 2 }
+            ?: "MILA Client"
+        val safeMobile = metadata.mobileNumber.trim().takeIf { it.length >= 7 } ?: "Not Provided"
+        val safeCompany = metadata.companyName.trim().takeIf { it.length >= 2 } ?: "Hospitality Venture"
+        val safeDesignation = metadata.designation.trim().takeIf { it.length >= 2 } ?: "Client Member"
+        val safeCity = metadata.city.trim().takeIf { it.length >= 2 } ?: "India"
         dbClient.upsertUserProfile(
             accessToken = session.accessToken,
             userId = session.userId,
-            email = metadata.email,
-            fullName = metadata.fullName,
-            mobileNumber = metadata.mobileNumber,
+            email = safeEmail,
+            fullName = safeName,
+            mobileNumber = safeMobile,
             accountType = "CLIENT"
         )
         dbClient.upsertClientProfile(
@@ -507,12 +850,12 @@ class SupabaseAuthClient(
             userId = session.userId,
             profile = ClientProfile(
                 userId = session.userId,
-                fullName = metadata.fullName,
-                email = metadata.email,
-                mobileNumber = metadata.mobileNumber,
-                companyName = metadata.companyName,
-                designation = metadata.designation,
-                city = metadata.city,
+                fullName = safeName,
+                email = safeEmail,
+                mobileNumber = safeMobile,
+                companyName = safeCompany,
+                designation = safeDesignation,
+                city = safeCity,
                 businessCategory = metadata.businessCategory.name
             )
         )

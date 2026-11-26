@@ -69,7 +69,7 @@ fun AdminDashboardOverviewModule(
         item {
             AdminModuleHeader(
                 module = AdminModule.DASHBOARD_OVERVIEW,
-                subtitle = "Live database telemetry scoped to ${role.displayLabel}. Every metric reflects real Firestore records.",
+                subtitle = "Live database telemetry scoped to ${role.displayLabel}. Every metric reflects live MILA records.",
                 isReadOnly = role.isReadOnly
             )
         }
@@ -183,7 +183,7 @@ fun AdminReportsAnalyticsModule(
         item {
             AdminModuleHeader(
                 module = AdminModule.REPORTS_AND_ANALYTICS,
-                subtitle = "Zero fabricated figures — every breakdown below aggregates live Firestore documents.",
+                subtitle = "Zero fabricated figures — every breakdown below aggregates live MILA database records.",
                 isReadOnly = actor.resolvedRole.isReadOnly
             )
         }

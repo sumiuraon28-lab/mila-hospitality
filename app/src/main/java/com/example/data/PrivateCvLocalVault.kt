@@ -98,4 +98,88 @@ object PrivateCvLocalVault {
             File(rootDir, storagePath.substringAfterLast('/')).delete()
         }
     }
+
+    suspend fun readOwnerOnlyCopy(
+        context: Context,
+        userId: String,
+        storagePath: String?
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        if (userId.isBlank()) return@withContext null
+        val rootDir = File(context.filesDir, "private_cvs/$userId")
+        if (!rootDir.exists()) return@withContext null
+        val candidateFile = if (!storagePath.isNullOrBlank()) {
+            File(rootDir, storagePath.substringAfterLast('/'))
+        } else {
+            rootDir.listFiles()?.firstOrNull()
+        }
+        candidateFile?.takeIf { it.exists() && it.isFile }?.readBytes()
+    }
+
+    data class SavedAdminCvDownload(
+        val fileName: String,
+        val mimeType: String,
+        val shareableUri: Uri,
+        val savedToDeviceDownloads: Boolean
+    )
+
+    suspend fun saveDownloadedCvForAdmin(
+        context: Context,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray
+    ): Result<SavedAdminCvDownload> = withContext(Dispatchers.IO) {
+        try {
+            val safeName = CandidateValidator.sanitizeCvFileName(fileName)
+            val resolvedMime = CandidateValidator.inferMimeType(safeName, mimeType)
+
+            // 1. Save into public Downloads/MILA_CVs on Android 10+ (zero runtime permissions required)
+            var savedToDownloads = false
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, resolvedMime)
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MILA_CVs")
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val downloadUri = resolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    values
+                )
+                if (downloadUri != null) {
+                    resolver.openOutputStream(downloadUri)?.use { out ->
+                        out.write(bytes)
+                    }
+                    values.clear()
+                    values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(downloadUri, values, null, null)
+                    savedToDownloads = true
+                }
+            }
+
+            // 2. Write a shareable copy into cache/cv_downloads for immediate FileProvider viewing
+            val cacheDir = File(context.cacheDir, "cv_downloads").apply {
+                if (!exists()) mkdirs()
+            }
+            val cacheFile = File(cacheDir, safeName)
+            cacheFile.writeBytes(bytes)
+
+            val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                cacheFile
+            )
+
+            Result.success(
+                SavedAdminCvDownload(
+                    fileName = safeName,
+                    mimeType = resolvedMime,
+                    shareableUri = contentUri,
+                    savedToDeviceDownloads = savedToDownloads
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
