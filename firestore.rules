@@ -1,0 +1,1015 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL HARDENED PRIMITIVES ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string &&
+             id.size() >= 1 &&
+             id.size() <= 128 &&
+             id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidInviteKey(id) {
+      return id is string &&
+             id.size() >= 5 &&
+             id.size() <= 128 &&
+             id.matches('^[a-zA-Z0-9._%+\\-@]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidStringList(listVal, maxItems, maxItemLen) {
+      return listVal is list &&
+             listVal.size() >= 1 &&
+             listVal.size() <= maxItems &&
+             listVal[0] is string &&
+             listVal[0].size() >= 2 &&
+             listVal[0].size() <= maxItemLen;
+    }
+
+    function isValidOptionalStringList(listVal, maxItems, maxItemLen) {
+      return listVal is list &&
+             listVal.size() <= maxItems &&
+             (listVal.size() == 0 || (listVal[0] is string && listVal[0].size() >= 2 && listVal[0].size() <= maxItemLen));
+    }
+
+    // --- ADMIN RBAC HELPERS ---
+    function adminUserPath(uid) {
+      return /databases/$(database)/documents/adminUsers/$(uid);
+    }
+
+    function isBootstrapOwnerEmail() {
+      return isSignedIn() &&
+             ('email' in request.auth.token) &&
+             request.auth.token.email == 'sumiuraon28@gmail.com' &&
+             ('email_verified' in request.auth.token) &&
+             request.auth.token.email_verified == true;
+    }
+
+    function hasActiveAdminRecord() {
+      return isSignedIn() &&
+             exists(adminUserPath(request.auth.uid)) &&
+             get(adminUserPath(request.auth.uid)).data.active == true;
+    }
+
+    function adminRole() {
+      return get(adminUserPath(request.auth.uid)).data.role;
+    }
+
+    function hasAnyAdminRole(roles) {
+      return hasActiveAdminRecord() && adminRole() in roles;
+    }
+
+    function isSuperAdmin() {
+      return (isSignedIn() && ('admin' in request.auth.token) && request.auth.token.admin == true) ||
+             hasAnyAdminRole(['SUPER_ADMIN']);
+    }
+
+    function isRecruitmentAdmin() {
+      return hasAnyAdminRole(['RECRUITMENT_ADMIN']);
+    }
+
+    function isContentAdmin() {
+      return hasAnyAdminRole(['CONTENT_ADMIN']);
+    }
+
+    function isConsultant() {
+      return hasAnyAdminRole(['CONSULTANT']);
+    }
+
+    function isReportingAdmin() {
+      return hasAnyAdminRole(['REPORTING_ADMIN']);
+    }
+
+    function isAnyActiveAdmin() {
+      return isSuperAdmin() || hasAnyAdminRole(['SUPER_ADMIN', 'RECRUITMENT_ADMIN', 'CONTENT_ADMIN', 'CONSULTANT', 'REPORTING_ADMIN']);
+    }
+
+    function isWriteCapableAdmin() {
+      return isSuperAdmin() || hasAnyAdminRole(['SUPER_ADMIN', 'RECRUITMENT_ADMIN', 'CONTENT_ADMIN', 'CONSULTANT']);
+    }
+
+    function isAdmin() {
+      return isSuperAdmin();
+    }
+
+    // --- VALIDATION HELPERS ---
+    function isValidAdminRole(role) {
+      return role in ['SUPER_ADMIN', 'RECRUITMENT_ADMIN', 'CONTENT_ADMIN', 'CONSULTANT', 'REPORTING_ADMIN'];
+    }
+
+    function isValidAdminUser(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+             data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 100 &&
+             isValidAdminRole(data.role) &&
+             data.active is bool &&
+             (!('assignedDepartment' in data) || (data.assignedDepartment is string && data.assignedDepartment.size() <= 80)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminInvite(data) {
+      return data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+             data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 100 &&
+             isValidAdminRole(data.role) &&
+             data.active is bool &&
+             data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidServiceOffering(data) {
+      return data.serviceType in [
+               'HOSPITALITY_PRE_OPENING',
+               'RESTAURANT_CAFE_DEVELOPMENT',
+               'BAR_BEVERAGE_CONSULTANCY',
+               'HOSPITALITY_TRAINING',
+               'OPERATIONS_MANAGEMENT',
+               'RECRUITMENT_TALENT_ACQUISITION',
+               'BUSINESS_CONCEPT_DEVELOPMENT',
+               'HOSPITALITY_MANAGEMENT_SOLUTIONS'
+             ] &&
+             data.sortOrder is int && data.sortOrder >= 1 && data.sortOrder <= 100 &&
+             data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 120 &&
+             data.divisionName is string && data.divisionName.size() >= 2 && data.divisionName.size() <= 80 &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             data.subtitle is string && data.subtitle.size() >= 2 && data.subtitle.size() <= 160 &&
+             data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 500 &&
+             data.detailedDescription is string && data.detailedDescription.size() >= 20 && data.detailedDescription.size() <= 3000 &&
+             isValidStringList(data.servicesIncluded, 20, 240) &&
+             isValidStringList(data.ownerBenefits, 20, 240) &&
+             isValidStringList(data.deliverables, 20, 240) &&
+             data.typicalTimeline is string && data.typicalTimeline.size() >= 2 && data.typicalTimeline.size() <= 80 &&
+             data.imageKey is string && data.imageKey.size() >= 2 && data.imageKey.size() <= 120 &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidServiceCategory(data) {
+      return data.code is string && data.code.size() >= 2 && data.code.size() <= 80 &&
+             data.sortOrder is int && data.sortOrder >= 1 && data.sortOrder <= 100 &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             data.divisionName is string && data.divisionName.size() >= 2 && data.divisionName.size() <= 80 &&
+             data.summary is string && data.summary.size() >= 5 && data.summary.size() <= 500 &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidJobVacancy(data) {
+      return data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             data.propertyTier is string && data.propertyTier.size() >= 2 && data.propertyTier.size() <= 120 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 80 &&
+             data.cityRegion is string && data.cityRegion.size() >= 2 && data.cityRegion.size() <= 80 &&
+             data.compensation is string && data.compensation.size() >= 2 && data.compensation.size() <= 100 &&
+             data.experienceRequired is string && data.experienceRequired.size() >= 2 && data.experienceRequired.size() <= 80 &&
+             data.minExperienceYears is int && data.minExperienceYears >= 0 && data.minExperienceYears <= 60 &&
+             data.category is string && data.category.size() >= 2 && data.category.size() <= 60 &&
+             data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 600 &&
+             isValidOptionalStringList(data.keyMandates, 15, 240) &&
+             isValidOptionalStringList(data.desiredSkills, 15, 100) &&
+             data.urgent is bool &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSitePageContent(data) {
+      return data.pageKey is string && data.pageKey.size() >= 2 && data.pageKey.size() <= 80 &&
+             data.pageTitle is string && data.pageTitle.size() >= 2 && data.pageTitle.size() <= 120 &&
+             data.eyebrow is string && data.eyebrow.size() >= 2 && data.eyebrow.size() <= 120 &&
+             data.headline is string && data.headline.size() >= 2 && data.headline.size() <= 200 &&
+             data.subheadline is string && data.subheadline.size() >= 2 && data.subheadline.size() <= 400 &&
+             data.bodyCopy is string && data.bodyCopy.size() >= 5 && data.bodyCopy.size() <= 2000 &&
+             data.heroImageKey is string && data.heroImageKey.size() >= 2 && data.heroImageKey.size() <= 120 &&
+             (!('heroImageUrl' in data) || (data.heroImageUrl is string && data.heroImageUrl.size() <= 500)) &&
+             data.ctaLabel is string && data.ctaLabel.size() >= 2 && data.ctaLabel.size() <= 80 &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidPortfolioItem(data) {
+      return data.propertyName is string && data.propertyName.size() >= 2 && data.propertyName.size() <= 140 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 100 &&
+             data.category is string && data.category.size() >= 2 && data.category.size() <= 80 &&
+             data.filterGroup is string && data.filterGroup.size() >= 2 && data.filterGroup.size() <= 80 &&
+             data.scale is string && data.scale.size() >= 2 && data.scale.size() <= 120 &&
+             data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 600 &&
+             isValidStringList(data.outcomes, 12, 240) &&
+             data.imageKey is string && data.imageKey.size() >= 2 && data.imageKey.size() <= 120 &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
+             data.sortOrder is int && data.sortOrder >= 1 && data.sortOrder <= 100 &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidTestimonial(data) {
+      return data.quote is string && data.quote.size() >= 10 && data.quote.size() <= 600 &&
+             data.attributionRole is string && data.attributionRole.size() >= 2 && data.attributionRole.size() <= 120 &&
+             data.engagementContext is string && data.engagementContext.size() >= 4 && data.engagementContext.size() <= 160 &&
+             data.sortOrder is int && data.sortOrder >= 1 && data.sortOrder <= 100 &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidTeamMember(data) {
+      return data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
+             data.designation is string && data.designation.size() >= 2 && data.designation.size() <= 120 &&
+             data.divisionName is string && data.divisionName.size() >= 2 && data.divisionName.size() <= 80 &&
+             data.specialty is string && data.specialty.size() >= 2 && data.specialty.size() <= 200 &&
+             data.yearsExperience is int && data.yearsExperience >= 0 && data.yearsExperience <= 60 &&
+             data.credentials is string && data.credentials.size() >= 2 && data.credentials.size() <= 400 &&
+             data.imageKey is string && data.imageKey.size() >= 2 && data.imageKey.size() <= 120 &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
+             data.sortOrder is int && data.sortOrder >= 1 && data.sortOrder <= 100 &&
+             data.published is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminSettings(data) {
+      return data.maintenanceMode is bool &&
+             data.allowClientRegistrations is bool &&
+             data.allowCandidateRegistrations is bool &&
+             data.requireCvForApplications is bool &&
+             data.defaultEnquirySlaHours is int && data.defaultEnquirySlaHours >= 1 && data.defaultEnquirySlaHours <= 168 &&
+             data.supportEmail is string && data.supportEmail.size() >= 5 && data.supportEmail.size() <= 120 &&
+             data.officeRegions is string && data.officeRegions.size() >= 2 && data.officeRegions.size() <= 240 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidNotificationControls(data) {
+      return data.autoDispatchOnPublish is bool &&
+             data.enableInApp is bool &&
+             data.enableAndroidPush is bool &&
+             data.enableIosPush is bool &&
+             data.enableEmailNotifications is bool &&
+             data.enableApplicationStatusAlerts is bool &&
+             data.requireDepartmentMatch is bool &&
+             data.requireLocationMatch is bool &&
+             data.experienceToleranceYears is int && data.experienceToleranceYears >= 0 && data.experienceToleranceYears <= 5 &&
+             data.dailyCapPerCandidate is int && data.dailyCapPerCandidate >= 1 && data.dailyCapPerCandidate <= 50 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidNotificationDeliveryLog(data) {
+      return data.eventType in ['VACANCY_MATCH', 'APPLICATION_STATUS', 'ADMIN_DIRECT'] &&
+             data.recipientUserId is string && data.recipientUserId.size() >= 1 && data.recipientUserId.size() <= 128 &&
+             data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 120 &&
+             data.recipientEmail is string && data.recipientEmail.size() <= 120 &&
+             data.roleId is string && data.roleId.size() >= 1 && data.roleId.size() <= 128 &&
+             data.roleTitle is string && data.roleTitle.size() >= 1 && data.roleTitle.size() <= 140 &&
+             data.channel in ['IN_APP', 'ANDROID_PUSH', 'IOS_PUSH', 'EMAIL'] &&
+             data.status in ['DELIVERED', 'QUEUED', 'SKIPPED', 'FAILED'] &&
+             data.matchScore is int && data.matchScore >= 0 && data.matchScore <= 100 &&
+             data.matchSummary is string && data.matchSummary.size() <= 300 &&
+             data.detail is string && data.detail.size() <= 400 &&
+             data.actorEmail is string && data.actorEmail.size() >= 5 && data.actorEmail.size() <= 120 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidCandidateDeviceToken(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.fcmToken is string && data.fcmToken.size() >= 10 && data.fcmToken.size() <= 512 &&
+             data.platform in ['ANDROID', 'IOS'] &&
+             data.deviceLabel is string && data.deviceLabel.size() >= 1 && data.deviceLabel.size() <= 120 &&
+             data.active is bool &&
+             data.pushEnabled is bool &&
+             data.emailEnabled is bool &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidActivityLog(data) {
+      return data.actorUid is string && data.actorUid.size() >= 1 && data.actorUid.size() <= 128 &&
+             data.actorEmail is string && data.actorEmail.size() >= 5 && data.actorEmail.size() <= 120 &&
+             isValidAdminRole(data.actorRole) &&
+             data.module is string && data.module.size() >= 2 && data.module.size() <= 80 &&
+             data.action is string && data.action.size() >= 2 && data.action.size() <= 60 &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.summary is string && data.summary.size() >= 2 && data.summary.size() <= 400 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidConsultationInquiry(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.propertyName is string && data.propertyName.size() >= 2 && data.propertyName.size() <= 120 &&
+             data.city is string && data.city.size() >= 2 && data.city.size() <= 80 &&
+             data.serviceType in [
+               'HOSPITALITY_PRE_OPENING',
+               'RESTAURANT_CAFE_DEVELOPMENT',
+               'BAR_BEVERAGE_CONSULTANCY',
+               'HOSPITALITY_TRAINING',
+               'OPERATIONS_MANAGEMENT',
+               'RECRUITMENT_TALENT_ACQUISITION',
+               'BUSINESS_CONCEPT_DEVELOPMENT',
+               'HOSPITALITY_MANAGEMENT_SOLUTIONS',
+               'PRE_OPENING',
+               'CAFE_RESTAURANT_SETUP',
+               'BEVERAGE_MIXOLOGY',
+               'EXECUTIVE_SEARCH',
+               'OPERATIONAL_AUDIT'
+             ] &&
+             data.scaleSummary is string && data.scaleSummary.size() >= 1 && data.scaleSummary.size() <= 80 &&
+             data.contactName is string && data.contactName.size() >= 2 && data.contactName.size() <= 100 &&
+             data.contactEmail is string && data.contactEmail.size() >= 5 && data.contactEmail.size() <= 120 &&
+             data.contactPhone is string && data.contactPhone.size() >= 7 && data.contactPhone.size() <= 25 &&
+             (!('briefNotes' in data) || (data.briefNotes is string && data.briefNotes.size() <= 1000)) &&
+             (!('assignedConsultantUid' in data) || (data.assignedConsultantUid is string && data.assignedConsultantUid.size() <= 128)) &&
+             (!('assignedConsultantEmail' in data) || (data.assignedConsultantEmail is string && data.assignedConsultantEmail.size() <= 120)) &&
+             (!('consultantNotes' in data) || (data.consultantNotes is string && data.consultantNotes.size() <= 2000)) &&
+             data.status in ['SUBMITTED', 'UNDER_REVIEW', 'PROPOSAL_SHARED', 'CONVERTED', 'WITHDRAWN'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidJobApplication(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidId(data.roleId) &&
+             data.roleTitle is string && data.roleTitle.size() >= 2 && data.roleTitle.size() <= 120 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 80 &&
+             data.candidateName is string && data.candidateName.size() >= 2 && data.candidateName.size() <= 100 &&
+             data.candidateEmail is string && data.candidateEmail.size() >= 5 && data.candidateEmail.size() <= 120 &&
+             data.candidatePhone is string && data.candidatePhone.size() >= 7 && data.candidatePhone.size() <= 25 &&
+             data.yearsExperience is int && data.yearsExperience >= 0 && data.yearsExperience <= 60 &&
+             data.currentProperty is string && data.currentProperty.size() >= 2 && data.currentProperty.size() <= 120 &&
+             (!('coverNote' in data) || (data.coverNote is string && data.coverNote.size() <= 1000)) &&
+             (!('cvFileName' in data) || (data.cvFileName is string && data.cvFileName.size() <= 160)) &&
+             data.status in [
+               'APPLIED',
+               'UNDER_REVIEW',
+               'SHORTLISTED',
+               'INTERVIEW_SCHEDULED',
+               'OFFER_EXTENDED',
+               'HIRED',
+               'DECLINED',
+               'WITHDRAWN'
+             ] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSavedRole(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidId(data.roleId) &&
+             data.roleTitle is string && data.roleTitle.size() >= 2 && data.roleTitle.size() <= 120 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 80 &&
+             data.compensation is string && data.compensation.size() >= 2 && data.compensation.size() <= 80 &&
+             data.category is string && data.category.size() >= 2 && data.category.size() <= 60 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidClientProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+             data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() >= 7 && data.mobileNumber.size() <= 25 &&
+             data.companyName is string && data.companyName.size() >= 2 && data.companyName.size() <= 120 &&
+             data.designation is string && data.designation.size() >= 2 && data.designation.size() <= 80 &&
+             data.city is string && data.city.size() >= 2 && data.city.size() <= 80 &&
+             data.businessCategory in [
+               'LUXURY_HOTEL_RESORT',
+               'BOUTIQUE_HERITAGE_PROPERTY',
+               'RESTAURANT_FINE_DINING',
+               'CAFE_ROASTERY_BAKERY',
+               'BAR_COCKTAIL_LOUNGE',
+               'HOSPITALITY_GROUP_INVESTOR',
+               'OTHER_HOSPITALITY_VENTURE'
+             ] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCandidateProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+             data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() >= 7 && data.mobileNumber.size() <= 25 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 80 &&
+             data.currentDesignation is string && data.currentDesignation.size() >= 2 && data.currentDesignation.size() <= 100 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 80 &&
+             data.totalExperienceYears is int && data.totalExperienceYears >= 0 && data.totalExperienceYears <= 60 &&
+             data.currentEmployer is string && data.currentEmployer.size() >= 1 && data.currentEmployer.size() <= 120 &&
+             data.previousEmployers is string && data.previousEmployers.size() <= 500 &&
+             data.education is string && data.education.size() >= 2 && data.education.size() <= 200 &&
+             data.skills is string && data.skills.size() >= 2 && data.skills.size() <= 400 &&
+             data.preferredJobLocations is string && data.preferredJobLocations.size() >= 2 && data.preferredJobLocations.size() <= 200 &&
+             data.expectedSalary is string && data.expectedSalary.size() >= 2 && data.expectedSalary.size() <= 80 &&
+             data.availability is string && data.availability.size() >= 2 && data.availability.size() <= 80 &&
+             data.noticePeriod is string && data.noticePeriod.size() >= 2 && data.noticePeriod.size() <= 80 &&
+             data.jobAlertsEnabled is bool &&
+             (!('cvFileName' in data) || (data.cvFileName is string && data.cvFileName.size() <= 160)) &&
+             (!('cvMimeType' in data) || (data.cvMimeType in [
+               'application/pdf',
+               'application/msword',
+               'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+             ])) &&
+             (!('cvFileSizeBytes' in data) || (data.cvFileSizeBytes is int && data.cvFileSizeBytes >= 0 && data.cvFileSizeBytes <= 10485760)) &&
+             (!('cvStoragePath' in data) || (data.cvStoragePath is string && data.cvStoragePath.size() <= 240 && !data.cvStoragePath.matches('^https?://.*'))) &&
+             (!('cvUploadedAtMillis' in data) || (data.cvUploadedAtMillis is int && data.cvUploadedAtMillis >= 0)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidJobNotification(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidId(data.roleId) &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 140 &&
+             data.message is string && data.message.size() >= 2 && data.message.size() <= 400 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 80 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 80 &&
+             data.isRead is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // --- ADMIN RBAC REGISTRY, INVITES, SETTINGS & ACTIVITY LOGS ---
+    match /adminUsers/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isSuperAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isReportingAdmin();
+
+      allow create: if isValidId(uid) &&
+                       incoming().keys().hasAll(['uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['uid', 'email', 'displayName', 'role', 'active', 'assignedDepartment', 'createdAt', 'updatedAt']) &&
+                       isValidAdminUser(incoming()) &&
+                       (
+                         isSuperAdmin() ||
+                         (
+                           isOwner(uid) &&
+                           isBootstrapOwnerEmail() &&
+                           incoming().uid == request.auth.uid &&
+                           incoming().role == 'SUPER_ADMIN' &&
+                           incoming().active == true
+                         ) ||
+                         (
+                           isOwner(uid) &&
+                           request.auth.token.email is string &&
+                           request.auth.token.email_verified == true &&
+                           incoming().uid == request.auth.uid &&
+                           incoming().active == true &&
+                           exists(/databases/$(database)/documents/adminInvites/$(request.auth.token.email)) &&
+                           get(/databases/$(database)/documents/adminInvites/$(request.auth.token.email)).data.active == true &&
+                           incoming().role == get(/databases/$(database)/documents/adminInvites/$(request.auth.token.email)).data.role
+                         )
+                       );
+
+      allow update: if isSuperAdmin() &&
+                       isValidId(uid) &&
+                       incoming().keys().hasAll(['uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['uid', 'email', 'displayName', 'role', 'active', 'assignedDepartment', 'createdAt', 'updatedAt']) &&
+                       isValidAdminUser(incoming()) &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt;
+
+      allow delete: if isSuperAdmin() && isValidId(uid);
+    }
+
+    match /adminInvites/{emailKey} {
+      allow get: if isValidInviteKey(emailKey) &&
+                    (isSuperAdmin() || (isSignedIn() && request.auth.token.email_verified == true && request.auth.token.email == emailKey));
+      allow list: if isSuperAdmin();
+
+      allow create, update: if isSuperAdmin() &&
+                               isValidInviteKey(emailKey) &&
+                               incoming().keys().hasAll(['email', 'displayName', 'role', 'active', 'createdByUid', 'createdAt', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['email', 'displayName', 'role', 'active', 'createdByUid', 'createdAt', 'updatedAt']) &&
+                               isValidAdminInvite(incoming());
+
+      allow delete: if isSuperAdmin() && isValidInviteKey(emailKey);
+    }
+
+    match /adminSettings/{settingId} {
+      allow get: if isValidId(settingId) && (
+                    isSuperAdmin() ||
+                    isReportingAdmin() ||
+                    (settingId == 'notifications' && isRecruitmentAdmin())
+                  );
+      allow list: if isSuperAdmin() || isReportingAdmin();
+
+      allow create, update: if isValidId(settingId) && (
+        (
+          isSuperAdmin() &&
+          settingId != 'notifications' &&
+          incoming().keys().hasAll([
+            'maintenanceMode', 'allowClientRegistrations', 'allowCandidateRegistrations',
+            'requireCvForApplications', 'defaultEnquirySlaHours', 'supportEmail',
+            'officeRegions', 'updatedAt'
+          ]) &&
+          incoming().keys().hasOnly([
+            'maintenanceMode', 'allowClientRegistrations', 'allowCandidateRegistrations',
+            'requireCvForApplications', 'defaultEnquirySlaHours', 'supportEmail',
+            'officeRegions', 'updatedAt'
+          ]) &&
+          isValidAdminSettings(incoming())
+        ) ||
+        (
+          (isSuperAdmin() || isRecruitmentAdmin()) &&
+          settingId == 'notifications' &&
+          incoming().keys().hasAll([
+            'autoDispatchOnPublish', 'enableInApp', 'enableAndroidPush', 'enableIosPush',
+            'enableEmailNotifications', 'enableApplicationStatusAlerts',
+            'requireDepartmentMatch', 'requireLocationMatch',
+            'experienceToleranceYears', 'dailyCapPerCandidate', 'updatedAt'
+          ]) &&
+          incoming().keys().hasOnly([
+            'autoDispatchOnPublish', 'enableInApp', 'enableAndroidPush', 'enableIosPush',
+            'enableEmailNotifications', 'enableApplicationStatusAlerts',
+            'requireDepartmentMatch', 'requireLocationMatch',
+            'experienceToleranceYears', 'dailyCapPerCandidate', 'updatedAt'
+          ]) &&
+          isValidNotificationControls(incoming())
+        )
+      );
+
+      allow delete: if isSuperAdmin() && isValidId(settingId);
+    }
+
+    match /notificationDeliveryLogs/{logId} {
+      allow get: if isValidId(logId) && (isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin();
+
+      allow create: if (isSuperAdmin() || isRecruitmentAdmin()) &&
+                       isValidId(logId) &&
+                       incoming().keys().hasAll([
+                         'eventType', 'recipientUserId', 'recipientName', 'recipientEmail',
+                         'roleId', 'roleTitle', 'channel', 'status', 'matchScore',
+                         'matchSummary', 'detail', 'actorEmail', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'eventType', 'recipientUserId', 'recipientName', 'recipientEmail',
+                         'roleId', 'roleTitle', 'channel', 'status', 'matchScore',
+                         'matchSummary', 'detail', 'actorEmail', 'createdAt'
+                       ]) &&
+                       isValidNotificationDeliveryLog(incoming());
+
+      allow update, delete: if false;
+    }
+
+    match /activityLogs/{logId} {
+      allow get: if isValidId(logId) && isAnyActiveAdmin();
+      allow list: if isAnyActiveAdmin();
+
+      allow create: if isWriteCapableAdmin() &&
+                       isValidId(logId) &&
+                       incoming().actorUid == request.auth.uid &&
+                       incoming().keys().hasAll(['actorUid', 'actorEmail', 'actorRole', 'module', 'action', 'targetId', 'summary', 'createdAt']) &&
+                       incoming().keys().hasOnly(['actorUid', 'actorEmail', 'actorRole', 'module', 'action', 'targetId', 'summary', 'createdAt']) &&
+                       isValidActivityLog(incoming());
+
+      allow update, delete: if false;
+    }
+
+    // --- CMS-MANAGEABLE PUBLIC SERVICE CATALOGUE & CONTENT ---
+    match /services/{serviceId} {
+      allow get: if isValidId(serviceId) && (resource == null || existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isContentAdmin()) &&
+                               isValidId(serviceId) &&
+                               incoming().keys().hasAll([
+                                 'serviceType', 'sortOrder', 'slug', 'divisionName',
+                                 'title', 'subtitle', 'summary', 'detailedDescription',
+                                 'servicesIncluded', 'ownerBenefits', 'deliverables',
+                                 'typicalTimeline', 'imageKey', 'published', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'serviceType', 'sortOrder', 'slug', 'divisionName',
+                                 'title', 'subtitle', 'summary', 'detailedDescription',
+                                 'servicesIncluded', 'ownerBenefits', 'deliverables',
+                                 'typicalTimeline', 'imageKey', 'imageUrl', 'published', 'updatedAt'
+                               ]) &&
+                               isValidServiceOffering(incoming());
+
+      allow delete: if (isSuperAdmin() || isContentAdmin()) && isValidId(serviceId);
+    }
+
+    match /serviceCategories/{categoryId} {
+      allow get: if isValidId(categoryId) && (resource == null || existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isContentAdmin()) &&
+                               isValidId(categoryId) &&
+                               incoming().keys().hasAll(['code', 'sortOrder', 'title', 'divisionName', 'summary', 'published', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['code', 'sortOrder', 'title', 'divisionName', 'summary', 'published', 'updatedAt']) &&
+                               isValidServiceCategory(incoming());
+
+      allow delete: if (isSuperAdmin() || isContentAdmin()) && isValidId(categoryId);
+    }
+
+    match /jobVacancies/{vacancyId} {
+      allow get: if isValidId(vacancyId) && (resource == null || existing().published == true || isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isRecruitmentAdmin()) &&
+                               isValidId(vacancyId) &&
+                               incoming().keys().hasAll([
+                                 'title', 'propertyTier', 'location', 'cityRegion', 'compensation',
+                                 'experienceRequired', 'minExperienceYears', 'category', 'summary',
+                                 'keyMandates', 'desiredSkills', 'urgent', 'published', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'title', 'propertyTier', 'location', 'cityRegion', 'compensation',
+                                 'experienceRequired', 'minExperienceYears', 'category', 'summary',
+                                 'keyMandates', 'desiredSkills', 'urgent', 'published', 'updatedAt'
+                               ]) &&
+                               isValidJobVacancy(incoming());
+
+      allow delete: if (isSuperAdmin() || isRecruitmentAdmin()) && isValidId(vacancyId);
+    }
+
+    match /siteContent/{pageId} {
+      allow get: if isValidId(pageId) && (resource == null || existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isContentAdmin()) &&
+                               isValidId(pageId) &&
+                               incoming().keys().hasAll([
+                                 'pageKey', 'pageTitle', 'eyebrow', 'headline', 'subheadline',
+                                 'bodyCopy', 'heroImageKey', 'ctaLabel', 'published', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'pageKey', 'pageTitle', 'eyebrow', 'headline', 'subheadline',
+                                 'bodyCopy', 'heroImageKey', 'heroImageUrl', 'ctaLabel', 'published', 'updatedAt'
+                               ]) &&
+                               isValidSitePageContent(incoming());
+
+      allow delete: if (isSuperAdmin() || isContentAdmin()) && isValidId(pageId);
+    }
+
+    match /portfolioItems/{itemId} {
+      allow get: if isValidId(itemId) && (resource == null || existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isContentAdmin()) &&
+                               isValidId(itemId) &&
+                               incoming().keys().hasAll([
+                                 'propertyName', 'location', 'category', 'filterGroup', 'scale',
+                                 'summary', 'outcomes', 'imageKey', 'sortOrder', 'published', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'propertyName', 'location', 'category', 'filterGroup', 'scale',
+                                 'summary', 'outcomes', 'imageKey', 'imageUrl', 'sortOrder', 'published', 'updatedAt'
+                               ]) &&
+                               isValidPortfolioItem(incoming());
+
+      allow delete: if (isSuperAdmin() || isContentAdmin()) && isValidId(itemId);
+    }
+
+    match /testimonials/{testimonialId} {
+      allow get: if isValidId(testimonialId) && (resource == null || existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isContentAdmin()) &&
+                               isValidId(testimonialId) &&
+                               incoming().keys().hasAll([
+                                 'quote', 'attributionRole', 'engagementContext', 'sortOrder', 'published', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'quote', 'attributionRole', 'engagementContext', 'sortOrder', 'published', 'updatedAt'
+                               ]) &&
+                               isValidTestimonial(incoming());
+
+      allow delete: if (isSuperAdmin() || isContentAdmin()) && isValidId(testimonialId);
+    }
+
+    match /teamMembers/{memberId} {
+      allow get: if isValidId(memberId) && (resource == null || existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin());
+      allow list: if existing().published == true || isSuperAdmin() || isContentAdmin() || isReportingAdmin();
+
+      allow create, update: if (isSuperAdmin() || isContentAdmin()) &&
+                               isValidId(memberId) &&
+                               incoming().keys().hasAll([
+                                 'fullName', 'designation', 'divisionName', 'specialty', 'yearsExperience',
+                                 'credentials', 'imageKey', 'sortOrder', 'published', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'fullName', 'designation', 'divisionName', 'specialty', 'yearsExperience',
+                                 'credentials', 'imageKey', 'imageUrl', 'sortOrder', 'published', 'updatedAt'
+                               ]) &&
+                               isValidTeamMember(incoming());
+
+      allow delete: if (isSuperAdmin() || isContentAdmin()) && isValidId(memberId);
+    }
+
+    // --- ADMIN CROSS-USER COLLECTION GROUP RULES ---
+    match /{path=**}/clientProfiles/{profileId} {
+      allow get: if isValidId(profileId) && (isSuperAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isReportingAdmin();
+      allow update: if isSuperAdmin() &&
+                       isValidId(profileId) &&
+                       isValidClientProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isSuperAdmin() && isValidId(profileId);
+    }
+
+    match /{path=**}/consultationInquiries/{inquiryId} {
+      allow get: if isValidId(inquiryId) &&
+                    (isSuperAdmin() || isReportingAdmin() || (isConsultant() && resource.data.assignedConsultantUid == request.auth.uid));
+      allow list: if isSuperAdmin() || isReportingAdmin() || (isConsultant() && resource.data.assignedConsultantUid == request.auth.uid);
+
+      allow update: if isValidId(inquiryId) &&
+                       (
+                         isSuperAdmin() ||
+                         (
+                           isConsultant() &&
+                           existing().assignedConsultantUid == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'consultantNotes', 'updatedAt'])
+                         )
+                       ) &&
+                       isValidConsultationInquiry(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt;
+
+      allow delete: if isSuperAdmin() && isValidId(inquiryId);
+    }
+
+    match /{path=**}/candidateProfiles/{profileId} {
+      allow get: if isValidId(profileId) && (isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin();
+
+      allow update: if isValidId(profileId) &&
+                       (isSuperAdmin() || isRecruitmentAdmin()) &&
+                       isValidCandidateProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt;
+
+      allow delete: if isValidId(profileId) && (isSuperAdmin() || isRecruitmentAdmin());
+    }
+
+    match /{path=**}/jobApplications/{applicationId} {
+      allow get: if isValidId(applicationId) && (isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin();
+
+      allow update: if isValidId(applicationId) &&
+                       (isSuperAdmin() || isRecruitmentAdmin()) &&
+                       isValidJobApplication(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+
+      allow delete: if isValidId(applicationId) && (isSuperAdmin() || isRecruitmentAdmin());
+    }
+
+    match /{path=**}/jobNotifications/{notificationId} {
+      allow get: if isValidId(notificationId) && (isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin();
+
+      allow create: if (isSuperAdmin() || isRecruitmentAdmin()) &&
+                       isValidId(notificationId) &&
+                       incoming().keys().hasAll(['userId', 'roleId', 'title', 'message', 'department', 'location', 'isRead', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'roleId', 'title', 'message', 'department', 'location', 'isRead', 'createdAt']) &&
+                       isValidJobNotification(incoming());
+
+      allow delete: if (isSuperAdmin() || isRecruitmentAdmin()) && isValidId(notificationId);
+    }
+
+    match /{path=**}/deviceTokens/{tokenId} {
+      allow get: if isValidId(tokenId) && (isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin());
+      allow list: if isSuperAdmin() || isRecruitmentAdmin() || isReportingAdmin();
+    }
+
+    // --- USER-SCOPED COLLECTIONS ---
+    match /users/{userId} {
+      allow read, write: if false;
+
+      match /clientProfiles/{profileId} {
+        allow get: if isOwner(userId) && isValidId(profileId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(profileId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'userId', 'fullName', 'email', 'mobileNumber',
+                           'companyName', 'designation', 'city',
+                           'businessCategory', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'fullName', 'email', 'mobileNumber',
+                           'companyName', 'designation', 'city',
+                           'businessCategory', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidClientProfile(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(profileId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'fullName', 'email', 'mobileNumber',
+                           'companyName', 'designation', 'city',
+                           'businessCategory', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'fullName', 'email', 'mobileNumber',
+                           'companyName', 'designation', 'city',
+                           'businessCategory', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidClientProfile(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'fullName', 'email', 'mobileNumber', 'companyName',
+                           'designation', 'city', 'businessCategory', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(profileId);
+      }
+
+      match /candidateProfiles/{profileId} {
+        allow get: if isOwner(userId) && isValidId(profileId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(profileId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'userId', 'fullName', 'email', 'mobileNumber', 'location',
+                           'currentDesignation', 'department', 'totalExperienceYears',
+                           'currentEmployer', 'previousEmployers', 'education', 'skills',
+                           'preferredJobLocations', 'expectedSalary', 'availability',
+                           'noticePeriod', 'jobAlertsEnabled', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'fullName', 'email', 'mobileNumber', 'location',
+                           'currentDesignation', 'department', 'totalExperienceYears',
+                           'currentEmployer', 'previousEmployers', 'education', 'skills',
+                           'preferredJobLocations', 'expectedSalary', 'availability',
+                           'noticePeriod', 'jobAlertsEnabled',
+                           'cvFileName', 'cvMimeType', 'cvFileSizeBytes', 'cvStoragePath', 'cvUploadedAtMillis',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCandidateProfile(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(profileId) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'fullName', 'email', 'mobileNumber', 'location',
+                           'currentDesignation', 'department', 'totalExperienceYears',
+                           'currentEmployer', 'previousEmployers', 'education', 'skills',
+                           'preferredJobLocations', 'expectedSalary', 'availability',
+                           'noticePeriod', 'jobAlertsEnabled',
+                           'cvFileName', 'cvMimeType', 'cvFileSizeBytes', 'cvStoragePath', 'cvUploadedAtMillis',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidCandidateProfile(incoming());
+
+        allow delete: if isOwner(userId) && isValidId(profileId);
+      }
+
+      match /jobNotifications/{notificationId} {
+        allow get: if isOwner(userId) && isValidId(notificationId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(notificationId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'userId', 'roleId', 'title', 'message', 'department', 'location', 'isRead', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'roleId', 'title', 'message', 'department', 'location', 'isRead', 'createdAt'
+                         ]) &&
+                         isValidJobNotification(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(notificationId) &&
+                         isValidJobNotification(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+
+        allow delete: if isOwner(userId) && isValidId(notificationId);
+      }
+
+      match /consultationInquiries/{inquiryId} {
+        allow get: if isOwner(userId) && isValidId(inquiryId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(inquiryId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().status == 'SUBMITTED' &&
+                         incoming().keys().hasAll([
+                           'userId', 'propertyName', 'city', 'serviceType',
+                           'scaleSummary', 'contactName', 'contactEmail',
+                           'contactPhone', 'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'propertyName', 'city', 'serviceType',
+                           'scaleSummary', 'contactName', 'contactEmail',
+                           'contactPhone', 'briefNotes', 'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidConsultationInquiry(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(inquiryId) &&
+                         isValidConsultationInquiry(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         existing().status != 'WITHDRAWN' &&
+                         (
+                           (incoming().status == existing().status &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['briefNotes', 'scaleSummary', 'updatedAt'])) ||
+                           (incoming().status == 'WITHDRAWN' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+                         );
+
+        allow delete: if isOwner(userId) && isValidId(inquiryId);
+      }
+
+      match /jobApplications/{applicationId} {
+        allow get: if isOwner(userId) && isValidId(applicationId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(applicationId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().status == 'APPLIED' &&
+                         incoming().keys().hasAll([
+                           'userId', 'roleId', 'roleTitle', 'location',
+                           'candidateName', 'candidateEmail', 'candidatePhone',
+                           'yearsExperience', 'currentProperty', 'status',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'roleId', 'roleTitle', 'location',
+                           'candidateName', 'candidateEmail', 'candidatePhone',
+                           'yearsExperience', 'currentProperty', 'coverNote', 'cvFileName',
+                           'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidJobApplication(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(applicationId) &&
+                         isValidJobApplication(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         existing().status != 'WITHDRAWN' &&
+                         incoming().status == 'WITHDRAWN' &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(applicationId);
+      }
+
+      match /savedRoles/{roleId} {
+        allow get: if isOwner(userId) && isValidId(roleId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(roleId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().roleId == roleId &&
+                         incoming().keys().hasAll([
+                           'userId', 'roleId', 'roleTitle', 'location',
+                           'compensation', 'category', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'roleId', 'roleTitle', 'location',
+                           'compensation', 'category', 'createdAt'
+                         ]) &&
+                         isValidSavedRole(incoming());
+
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(roleId);
+      }
+
+      match /deviceTokens/{tokenId} {
+        allow get: if isOwner(userId) && isValidId(tokenId);
+        allow list: if isOwner(userId);
+
+        allow create, update: if isOwner(userId) &&
+                                 isValidId(tokenId) &&
+                                 incoming().userId == request.auth.uid &&
+                                 incoming().keys().hasAll([
+                                   'userId', 'fcmToken', 'platform', 'deviceLabel',
+                                   'active', 'pushEnabled', 'emailEnabled', 'updatedAt'
+                                 ]) &&
+                                 incoming().keys().hasOnly([
+                                   'userId', 'fcmToken', 'platform', 'deviceLabel',
+                                   'active', 'pushEnabled', 'emailEnabled', 'updatedAt'
+                                 ]) &&
+                                 isValidCandidateDeviceToken(incoming());
+
+        allow delete: if isOwner(userId) && isValidId(tokenId);
+      }
+    }
+  }
+}

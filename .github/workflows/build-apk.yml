@@ -1,0 +1,103 @@
+name: Build Mila Hospitality APK
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+    inputs:
+      supabase_url:
+        description: "Optional Supabase Project URL (overrides SUPABASE_URL repo secret)"
+        required: false
+        type: string
+      supabase_anon_key:
+        description: "Optional Supabase Publishable/Anon Key (overrides SUPABASE_ANON_KEY repo secret)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Accept Android SDK licenses
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          fi
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Prepare debug signing keystore
+        run: |
+          if [ -f debug.keystore.base64 ]; then
+            base64 --decode debug.keystore.base64 > debug.keystore
+          elif [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Configure Supabase environment (.env)
+        env:
+          INPUT_SUPABASE_URL: ${{ inputs.supabase_url }}
+          INPUT_SUPABASE_ANON_KEY: ${{ inputs.supabase_anon_key }}
+          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          SUPA_URL="${INPUT_SUPABASE_URL:-$SECRET_SUPABASE_URL}"
+          SUPA_KEY="${INPUT_SUPABASE_ANON_KEY:-$SECRET_SUPABASE_ANON_KEY}"
+          if [ -n "$SUPA_URL" ] && [ -n "$SUPA_KEY" ]; then
+            printf 'SUPABASE_URL=%s\nSUPABASE_ANON_KEY=%s\n' "$SUPA_URL" "$SUPA_KEY" > .env
+            echo "Configured .env with Supabase credentials."
+          else
+            cp .env.example .env
+            echo "Warning: SUPABASE_URL / SUPABASE_ANON_KEY secrets not set in GitHub yet; using .env.example placeholders."
+          fi
+
+      - name: Build Android APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare Mila-Hospitality.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Mila-Hospitality.apk
+
+      - name: Upload APK build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mila-Hospitality-APK
+          path: Mila-Hospitality.apk
+          retention-days: 30
+
+      - name: Publish direct APK download on GitHub Releases
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest-apk >/dev/null 2>&1; then
+            gh release upload latest-apk Mila-Hospitality.apk --clobber
+          else
+            gh release create latest-apk Mila-Hospitality.apk \
+              --title "Mila Hospitality Android APK" \
+              --notes "Tap Mila-Hospitality.apk below on your Android phone to download and install directly."
+          fi

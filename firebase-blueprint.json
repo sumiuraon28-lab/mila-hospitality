@@ -1,0 +1,682 @@
+{
+  "entities": {
+    "ServiceOffering": {
+      "title": "ServiceOffering",
+      "description": "CMS-manageable hospitality consultancy service entry published by an admin panel for the 8 MILA service pages.",
+      "type": "object",
+      "properties": {
+        "serviceType": {
+          "type": "string",
+          "enum": [
+            "HOSPITALITY_PRE_OPENING",
+            "RESTAURANT_CAFE_DEVELOPMENT",
+            "BAR_BEVERAGE_CONSULTANCY",
+            "HOSPITALITY_TRAINING",
+            "OPERATIONS_MANAGEMENT",
+            "RECRUITMENT_TALENT_ACQUISITION",
+            "BUSINESS_CONCEPT_DEVELOPMENT",
+            "HOSPITALITY_MANAGEMENT_SOLUTIONS"
+          ],
+          "description": "Canonical MILA service category identifier."
+        },
+        "sortOrder": {
+          "type": "integer",
+          "description": "Display ordering index (1..8) controlled from the admin panel."
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-safe route slug for the service detail page."
+        },
+        "divisionName": {
+          "type": "string",
+          "description": "Parent MILA division (MILA Consultancy, MILA Talent, or MILA Academy & Expertise)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Professional title of the service category."
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "Editorial subtitle shown under the service title."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Concise overview shown on catalogue cards."
+        },
+        "detailedDescription": {
+          "type": "string",
+          "description": "Full editorial description shown on the dedicated service detail page."
+        },
+        "servicesIncluded": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Scope items included under this service category."
+        },
+        "ownerBenefits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Strategic and commercial benefits for hospitality business owners."
+        },
+        "deliverables": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tangible consultancy deliverables handed over to the client."
+        },
+        "typicalTimeline": {
+          "type": "string",
+          "description": "Estimated engagement duration."
+        },
+        "imageKey": {
+          "type": "string",
+          "description": "Bundled drawable asset key for offline-first luxury photography."
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Optional remote photograph URL managed from a future admin panel."
+        },
+        "published": {
+          "type": "boolean",
+          "description": "Controls public visibility from the future admin panel."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last admin update."
+        }
+      },
+      "required": [
+        "serviceType",
+        "sortOrder",
+        "slug",
+        "divisionName",
+        "title",
+        "subtitle",
+        "summary",
+        "detailedDescription",
+        "servicesIncluded",
+        "ownerBenefits",
+        "deliverables",
+        "typicalTimeline",
+        "imageKey",
+        "published",
+        "updatedAt"
+      ]
+    },
+    "ConsultationInquiry": {
+      "title": "ConsultationInquiry",
+      "description": "A hospitality consultancy mandate submitted by a client or property owner.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the client submitting the inquiry."
+        },
+        "propertyName": {
+          "type": "string",
+          "description": "Name of the hotel, resort, cafe, or restaurant project."
+        },
+        "city": {
+          "type": "string",
+          "description": "Indian city or region of the hospitality property."
+        },
+        "serviceType": {
+          "type": "string",
+          "enum": [
+            "HOSPITALITY_PRE_OPENING",
+            "RESTAURANT_CAFE_DEVELOPMENT",
+            "BAR_BEVERAGE_CONSULTANCY",
+            "HOSPITALITY_TRAINING",
+            "OPERATIONS_MANAGEMENT",
+            "RECRUITMENT_TALENT_ACQUISITION",
+            "BUSINESS_CONCEPT_DEVELOPMENT",
+            "HOSPITALITY_MANAGEMENT_SOLUTIONS",
+            "PRE_OPENING",
+            "CAFE_RESTAURANT_SETUP",
+            "BEVERAGE_MIXOLOGY",
+            "EXECUTIVE_SEARCH",
+            "OPERATIONAL_AUDIT"
+          ],
+          "description": "Selected MILA consultancy service category."
+        },
+        "scaleSummary": {
+          "type": "string",
+          "description": "Property scale such as key count or restaurant covers."
+        },
+        "contactName": {
+          "type": "string",
+          "description": "Primary stakeholder contact name."
+        },
+        "contactEmail": {
+          "type": "string",
+          "description": "Business email for mandate correspondence."
+        },
+        "contactPhone": {
+          "type": "string",
+          "description": "Contact phone number."
+        },
+        "briefNotes": {
+          "type": "string",
+          "description": "Optional business requirements, timeline, and scope details."
+        },
+        "assignedConsultantUid": {
+          "type": "string",
+          "description": "Optional UID of the MILA Consultant assigned to handle this enquiry."
+        },
+        "assignedConsultantEmail": {
+          "type": "string",
+          "description": "Optional email of the assigned MILA Consultant."
+        },
+        "consultantNotes": {
+          "type": "string",
+          "description": "Internal consultancy status and advisory notes managed by admins/consultants."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["SUBMITTED", "UNDER_REVIEW", "PROPOSAL_SHARED", "CONVERTED", "WITHDRAWN"],
+          "description": "Current status of the consultation mandate."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the inquiry was submitted (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the inquiry was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "propertyName",
+        "city",
+        "serviceType",
+        "scaleSummary",
+        "contactName",
+        "contactEmail",
+        "contactPhone",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "JobApplication": {
+      "title": "JobApplication",
+      "description": "A candidate application submitted for an open hospitality leadership or specialist role.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the applicant."
+        },
+        "roleId": {
+          "type": "string",
+          "description": "Identifier of the curated hospitality mandate."
+        },
+        "roleTitle": {
+          "type": "string",
+          "description": "Title of the position applied for."
+        },
+        "location": {
+          "type": "string",
+          "description": "City or region of the role."
+        },
+        "candidateName": {
+          "type": "string",
+          "description": "Full name of the candidate."
+        },
+        "candidateEmail": {
+          "type": "string",
+          "description": "Candidate email address."
+        },
+        "candidatePhone": {
+          "type": "string",
+          "description": "Candidate phone number."
+        },
+        "yearsExperience": {
+          "type": "integer",
+          "description": "Total years of hospitality industry experience."
+        },
+        "currentProperty": {
+          "type": "string",
+          "description": "Current or most recent hospitality group or property."
+        },
+        "coverNote": {
+          "type": "string",
+          "description": "Optional executive summary or achievements note."
+        },
+        "cvFileName": {
+          "type": "string",
+          "description": "Private CV filename attached from candidate vault (never a public download URL)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["APPLIED", "UNDER_REVIEW", "SHORTLISTED", "INTERVIEW_SCHEDULED", "OFFER_EXTENDED", "HIRED", "DECLINED", "WITHDRAWN"],
+          "description": "Current status of the job application."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the application was submitted (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the application was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "roleId",
+        "roleTitle",
+        "location",
+        "candidateName",
+        "candidateEmail",
+        "candidatePhone",
+        "yearsExperience",
+        "currentProperty",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SavedRole": {
+      "title": "SavedRole",
+      "description": "A bookmarked hospitality recruitment mandate shortlisted by the user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the user."
+        },
+        "roleId": {
+          "type": "string",
+          "description": "Identifier of the shortlisted role."
+        },
+        "roleTitle": {
+          "type": "string",
+          "description": "Position title."
+        },
+        "location": {
+          "type": "string",
+          "description": "City in India."
+        },
+        "compensation": {
+          "type": "string",
+          "description": "Compensation range label."
+        },
+        "category": {
+          "type": "string",
+          "description": "Practice category of the role."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the role was shortlisted (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "roleId",
+        "roleTitle",
+        "location",
+        "compensation",
+        "category",
+        "createdAt"
+      ]
+    },
+    "ClientProfile": {
+      "title": "ClientProfile",
+      "description": "Private hospitality client profile scoped strictly to the authenticated client owner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "companyName": { "type": "string" },
+        "designation": { "type": "string" },
+        "city": { "type": "string" },
+        "businessCategory": {
+          "type": "string",
+          "enum": [
+            "LUXURY_HOTEL_RESORT",
+            "BOUTIQUE_HERITAGE_PROPERTY",
+            "RESTAURANT_FINE_DINING",
+            "CAFE_ROASTERY_BAKERY",
+            "BAR_COCKTAIL_LOUNGE",
+            "HOSPITALITY_GROUP_INVESTOR",
+            "OTHER_HOSPITALITY_VENTURE"
+          ]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "fullName", "email", "mobileNumber", "companyName",
+        "designation", "city", "businessCategory", "createdAt", "updatedAt"
+      ]
+    },
+    "CandidateProfile": {
+      "title": "CandidateProfile",
+      "description": "Private MILA Talent job seeker profile, job alert preference, and private CV metadata.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "location": { "type": "string" },
+        "currentDesignation": { "type": "string" },
+        "department": { "type": "string" },
+        "totalExperienceYears": { "type": "integer" },
+        "currentEmployer": { "type": "string" },
+        "previousEmployers": { "type": "string" },
+        "education": { "type": "string" },
+        "skills": { "type": "string" },
+        "preferredJobLocations": { "type": "string" },
+        "expectedSalary": { "type": "string" },
+        "availability": { "type": "string" },
+        "noticePeriod": { "type": "string" },
+        "jobAlertsEnabled": { "type": "boolean" },
+        "cvFileName": { "type": "string" },
+        "cvMimeType": { "type": "string" },
+        "cvFileSizeBytes": { "type": "integer" },
+        "cvStoragePath": { "type": "string" },
+        "cvUploadedAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "fullName", "email", "mobileNumber", "location",
+        "currentDesignation", "department", "totalExperienceYears",
+        "currentEmployer", "previousEmployers", "education", "skills",
+        "preferredJobLocations", "expectedSalary", "availability",
+        "noticePeriod", "jobAlertsEnabled", "createdAt", "updatedAt"
+      ]
+    },
+    "JobNotification": {
+      "title": "JobNotification",
+      "description": "Private job alert or application update notification for a job seeker.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "roleId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "department": { "type": "string" },
+        "location": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "roleId", "title", "message", "department", "location", "isRead", "createdAt"
+      ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorised administrator account with explicit RBAC role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": {
+          "type": "string",
+          "enum": ["SUPER_ADMIN", "RECRUITMENT_ADMIN", "CONTENT_ADMIN", "CONSULTANT", "REPORTING_ADMIN"]
+        },
+        "active": { "type": "boolean" },
+        "assignedDepartment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "active", "createdAt", "updatedAt"]
+    },
+    "AdminInvite": {
+      "title": "AdminInvite",
+      "description": "Email allowlist entry authorizing an administrator role upon Google Sign-In.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": {
+          "type": "string",
+          "enum": ["SUPER_ADMIN", "RECRUITMENT_ADMIN", "CONTENT_ADMIN", "CONSULTANT", "REPORTING_ADMIN"]
+        },
+        "active": { "type": "boolean" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role", "active", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "ServiceCategoryRecord": {
+      "title": "ServiceCategoryRecord",
+      "description": "Admin-managed consultancy service category definition.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "title": { "type": "string" },
+        "divisionName": { "type": "string" },
+        "summary": { "type": "string" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "sortOrder", "title", "divisionName", "summary", "published", "updatedAt"]
+    },
+    "JobVacancyRecord": {
+      "title": "JobVacancyRecord",
+      "description": "Admin-managed hospitality job vacancy displayed on MILA Talent.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "propertyTier": { "type": "string" },
+        "location": { "type": "string" },
+        "cityRegion": { "type": "string" },
+        "compensation": { "type": "string" },
+        "experienceRequired": { "type": "string" },
+        "minExperienceYears": { "type": "integer" },
+        "category": { "type": "string" },
+        "summary": { "type": "string" },
+        "keyMandates": { "type": "array", "items": { "type": "string" } },
+        "desiredSkills": { "type": "array", "items": { "type": "string" } },
+        "urgent": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "title", "propertyTier", "location", "cityRegion", "compensation",
+        "experienceRequired", "minExperienceYears", "category", "summary",
+        "keyMandates", "desiredSkills", "urgent", "published", "updatedAt"
+      ]
+    },
+    "SitePageContent": {
+      "title": "SitePageContent",
+      "description": "Admin-managed website copy and hero photograph configuration for MILA pages.",
+      "type": "object",
+      "properties": {
+        "pageKey": { "type": "string" },
+        "pageTitle": { "type": "string" },
+        "eyebrow": { "type": "string" },
+        "headline": { "type": "string" },
+        "subheadline": { "type": "string" },
+        "bodyCopy": { "type": "string" },
+        "heroImageKey": { "type": "string" },
+        "heroImageUrl": { "type": "string" },
+        "ctaLabel": { "type": "string" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "pageKey", "pageTitle", "eyebrow", "headline", "subheadline",
+        "bodyCopy", "heroImageKey", "ctaLabel", "published", "updatedAt"
+      ]
+    },
+    "PortfolioItemRecord": {
+      "title": "PortfolioItemRecord",
+      "description": "Admin-managed hospitality pre-opening or consulting case study.",
+      "type": "object",
+      "properties": {
+        "propertyName": { "type": "string" },
+        "location": { "type": "string" },
+        "category": { "type": "string" },
+        "filterGroup": { "type": "string" },
+        "scale": { "type": "string" },
+        "summary": { "type": "string" },
+        "outcomes": { "type": "array", "items": { "type": "string" } },
+        "imageKey": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "propertyName", "location", "category", "filterGroup", "scale",
+        "summary", "outcomes", "imageKey", "sortOrder", "published", "updatedAt"
+      ]
+    },
+    "TestimonialRecord": {
+      "title": "TestimonialRecord",
+      "description": "Admin-managed client testimonial card.",
+      "type": "object",
+      "properties": {
+        "quote": { "type": "string" },
+        "attributionRole": { "type": "string" },
+        "engagementContext": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quote", "attributionRole", "engagementContext", "sortOrder", "published", "updatedAt"]
+    },
+    "TeamMemberRecord": {
+      "title": "TeamMemberRecord",
+      "description": "Admin-managed MILA consultancy, talent, or mixology leadership member.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "designation": { "type": "string" },
+        "divisionName": { "type": "string" },
+        "specialty": { "type": "string" },
+        "yearsExperience": { "type": "integer" },
+        "credentials": { "type": "string" },
+        "imageKey": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "fullName", "designation", "divisionName", "specialty", "yearsExperience",
+        "credentials", "imageKey", "sortOrder", "published", "updatedAt"
+      ]
+    },
+    "AdminSettings": {
+      "title": "AdminSettings",
+      "description": "Platform configuration settings managed by Super Admin.",
+      "type": "object",
+      "properties": {
+        "maintenanceMode": { "type": "boolean" },
+        "allowClientRegistrations": { "type": "boolean" },
+        "allowCandidateRegistrations": { "type": "boolean" },
+        "requireCvForApplications": { "type": "boolean" },
+        "defaultEnquirySlaHours": { "type": "integer" },
+        "supportEmail": { "type": "string" },
+        "officeRegions": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "maintenanceMode", "allowClientRegistrations", "allowCandidateRegistrations",
+        "requireCvForApplications", "defaultEnquirySlaHours", "supportEmail",
+        "officeRegions", "updatedAt"
+      ]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Immutable administrative audit trail record.",
+      "type": "object",
+      "properties": {
+        "actorUid": { "type": "string" },
+        "actorEmail": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "module": { "type": "string" },
+        "action": { "type": "string" },
+        "targetId": { "type": "string" },
+        "summary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorUid", "actorEmail", "actorRole", "module", "action", "targetId", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/services/{serviceId}": {
+      "schema": { "$ref": "#/entities/ServiceOffering" },
+      "description": "Publicly readable (published), admin-managed consultancy service catalogue."
+    },
+    "/serviceCategories/{categoryId}": {
+      "schema": { "$ref": "#/entities/ServiceCategoryRecord" },
+      "description": "Publicly readable (published), Content/Super Admin-managed service categories."
+    },
+    "/jobVacancies/{vacancyId}": {
+      "schema": { "$ref": "#/entities/JobVacancyRecord" },
+      "description": "Publicly readable (published), Recruitment/Super Admin-managed hospitality vacancies."
+    },
+    "/siteContent/{pageId}": {
+      "schema": { "$ref": "#/entities/SitePageContent" },
+      "description": "Publicly readable (published), Content/Super Admin-managed website page content."
+    },
+    "/portfolioItems/{itemId}": {
+      "schema": { "$ref": "#/entities/PortfolioItemRecord" },
+      "description": "Publicly readable (published), Content/Super Admin-managed portfolio case studies."
+    },
+    "/testimonials/{testimonialId}": {
+      "schema": { "$ref": "#/entities/TestimonialRecord" },
+      "description": "Publicly readable (published), Content/Super Admin-managed client testimonials."
+    },
+    "/teamMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMemberRecord" },
+      "description": "Publicly readable (published), Content/Super Admin-managed MILA leadership team."
+    },
+    "/adminUsers/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Authorised administrator RBAC registry."
+    },
+    "/adminInvites/{emailKey}": {
+      "schema": { "$ref": "#/entities/AdminInvite" },
+      "description": "Super Admin allowlist for authorizing admin roles by email."
+    },
+    "/adminSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/AdminSettings" },
+      "description": "Global platform configuration managed by Super Admin."
+    },
+    "/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Append-only administrative activity log."
+    },
+    "/users/{userId}/clientProfiles/{profileId}": {
+      "schema": { "$ref": "#/entities/ClientProfile" },
+      "description": "Private client profile metadata (owner or Super Admin)."
+    },
+    "/users/{userId}/candidateProfiles/{profileId}": {
+      "schema": { "$ref": "#/entities/CandidateProfile" },
+      "description": "Private candidate profile and CV metadata (owner, Super Admin, or Recruitment Admin)."
+    },
+    "/users/{userId}/jobNotifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/JobNotification" },
+      "description": "Private candidate alerts (owner, Super Admin, or Recruitment Admin create)."
+    },
+    "/users/{userId}/consultationInquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/ConsultationInquiry" },
+      "description": "Consultation mandates (owner, Super Admin, Reporting Admin read, or Assigned Consultant)."
+    },
+    "/users/{userId}/jobApplications/{applicationId}": {
+      "schema": { "$ref": "#/entities/JobApplication" },
+      "description": "Recruitment applications (owner, Super Admin, Recruitment Admin, Reporting Admin read)."
+    },
+    "/users/{userId}/savedRoles/{roleId}": {
+      "schema": { "$ref": "#/entities/SavedRole" },
+      "description": "User-scoped shortlisted hospitality job mandates."
+    }
+  }
+}

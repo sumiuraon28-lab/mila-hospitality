@@ -1,0 +1,6 @@
+{
+  "name": "Mila Hospitality",
+  "description": "Premium hospitality consultancy, pre-opening advisory, mixology curation, and executive recruitment platform for the Indian hospitality industry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,95 @@
+{
+  "expo": {
+    "name": "MILA Hospitality",
+    "slug": "mila-hospitality-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "scheme": "mila",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#191D1B"
+    },
+    "assetBundlePatterns": [
+      "assets/**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.milahospitality.mobile",
+      "buildNumber": "1",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "aps-environment": "production"
+      }
+    },
+    "android": {
+      "package": "com.milahospitality.mobile",
+      "versionCode": 1,
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#191D1B"
+      },
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.INTERNET"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "mila"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#D6BD96",
+          "defaultChannel": "mila_job_matches"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#191D1B",
+          "image": "./assets/splash.png",
+          "resizeMode": "cover"
+        }
+      ]
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "MILA Hospitality Consultant",
+      "shortName": "MILA",
+      "backgroundColor": "#191D1B",
+      "themeColor": "#191D1B"
+    },
+    "extra": {
+      "brandName": "MILA HOSPITALITY CONSULTANT",
+      "tagline": "Creating Excellence in Hospitality",
+      "supabaseProjectMigrations": "../supabase/migrations"
+    }
+  }
+}
