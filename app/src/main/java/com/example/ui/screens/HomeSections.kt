@@ -73,13 +73,13 @@ import com.example.ui.theme.MilaWarmStone
 
 @Composable
 fun HeroAtelierBanner(
-    onExploreServicesClick: () -> Unit,
-    onExploreCareersClick: () -> Unit
+    onExploreServicesClick: () -> Unit = {},
+    onExploreCareersClick: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(320.dp)
+            .height(250.dp)
     ) {
         Image(
             painter = painterResource(id = R.drawable.img_hero_hotel_1795637232836),
@@ -120,24 +120,6 @@ fun HeroAtelierBanner(
                 style = MaterialTheme.typography.bodyMedium.copy(color = MilaIvoryMuted),
                 modifier = Modifier.widthIn(max = 560.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                GoldFilledButton(
-                    text = "Our Services",
-                    onClick = onExploreServicesClick,
-                    testTag = "hero_services_button",
-                    modifier = Modifier.weight(1f)
-                )
-                GoldOutlineButton(
-                    text = stringResource(R.string.cta_explore_roles),
-                    onClick = onExploreCareersClick,
-                    testTag = "hero_talent_button",
-                    modifier = Modifier.weight(1f)
-                )
-            }
         }
     }
 }
