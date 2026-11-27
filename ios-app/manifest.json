@@ -1,17 +1,27 @@
 {
+  "id": "./",
+  "scope": "./",
   "name": "MILA Hospitality Consultant",
   "short_name": "MILA",
   "description": "Indian Luxury Hospitality Consultancy, Turnkey Pre-Openings, Mixology & Executive Talent.",
   "start_url": "./index.html",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#141816",
   "theme_color": "#141816",
+  "categories": ["business", "lifestyle"],
   "icons": [
     {
-      "src": "./icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

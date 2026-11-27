@@ -746,12 +746,15 @@
 
   // Screen Renderers
   function renderHome(root) {
-    // Hero
+    // Luxury Hero Photo Banner
     root.appendChild(
-      el("div", { className: "hero-card" }, [
-        el("span", { className: "pill pill-gold", text: "Indian Hospitality Consultancy & Recruitment" }),
-        el("h1", { className: "serif", text: "Creating Excellence in Hospitality" }),
-        el("p", { className: "muted-copy", text: "Turnkey hotel pre-openings, café and restaurant setups, champion mixology curation, and executive hospitality recruitment." })
+      el("div", { className: "hero-card-photo" }, [
+        el("img", { className: "hero-bg-img", src: "./hero-hotel.jpg", alt: "MILA Luxury Hospitality" }),
+        el("div", { className: "hero-scrim" }, [
+          el("span", { className: "pill pill-gold", text: "Indian Hospitality Consultancy & Recruitment" }),
+          el("h1", { className: "serif", text: "Creating Excellence in Hospitality" }),
+          el("p", { className: "muted-copy", text: "Turnkey hotel pre-openings, café and restaurant setups, champion mixology curation, and executive hospitality recruitment." })
+        ])
       ])
     );
 
@@ -1193,6 +1196,14 @@
       });
     }
 
+    if (!isRunningStandalone()) {
+      addGroup("Install Free Phone App");
+      addLink("Add MILA to iPhone / Home Screen", () => {
+        closeDrawer();
+        triggerInstallOrGuide();
+      }, false);
+    }
+
     addGroup("Account");
     if (state.user) {
       addLink("Sign Out (" + state.user.email + ")", async () => {
@@ -1363,7 +1374,148 @@
     }
   }
 
+  // Free Installable iPhone / PWA Support
+  const INSTALL_DISMISS_KEY = "mila_ios_install_banner_dismissed_v1";
+  let deferredInstallPrompt = null;
+
+  function isRunningStandalone() {
+    return (
+      window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
+    );
+  }
+
+  function isIosDevice() {
+    const ua = window.navigator.userAgent || "";
+    const isIpadDesktop = window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1;
+    return /iPhone|iPad|iPod/i.test(ua) || isIpadDesktop;
+  }
+
+  function openInstallGuideSheet() {
+    const onIos = isIosDevice();
+    const steps = onIos
+      ? [
+          ["1", "Open this page in Safari", "If you opened the link inside WhatsApp or Instagram, tap the Safari compass icon first."],
+          ["2", "Tap the Share button at the bottom", "Look for the square icon with an upward arrow (↑) in Safari's bottom toolbar."],
+          ["3", "Tap 'Add to Home Screen' → 'Add'", "The gold MILA icon appears on your iPhone Home Screen and opens full-screen like an App Store app — 100% free."]
+        ]
+      : [
+          ["1", "Open in Safari (iPhone) or Chrome (Android)", "Share this link to your iPhone and open it in Apple Safari."],
+          ["2", "Tap Share (iPhone) or Menu ⋮ (Android)", "Choose 'Add to Home Screen' (iPhone) or 'Install App' (Android)."],
+          ["3", "Tap Add / Install", "MILA installs right onto your Home Screen with its gold crest icon and stays synced live with your Admin Panel."]
+        ];
+
+    const bodyNodes = [
+      el("div", { style: "display:flex;align-items:center;gap:12px;" }, [
+        el("img", { src: "./apple-touch-icon.png", alt: "MILA Icon", className: "crest-badge-img" }),
+        el("div", null, [
+          el("div", { className: "serif", style: "font-size:18px;", text: "MILA Hospitality" }),
+          el("div", { className: "muted-copy", text: "100% Free • No App Store • Live Synced" })
+        ])
+      ]),
+      ...steps.map(([num, title, desc]) =>
+        el("div", { className: "install-step" }, [
+          el("div", { className: "install-step-num", text: num }),
+          el("div", null, [
+            el("div", { className: "install-step-title", text: title }),
+            el("div", { className: "install-step-desc", text: desc })
+          ])
+        ])
+      )
+    ];
+
+    const footerNodes = [
+      el("button", { className: "btn btn-gold btn-full", type: "button", text: "Got It", onClick: closeSheet })
+    ];
+    openSheet("Install MILA on iPhone (Free)", bodyNodes, footerNodes);
+  }
+
+  async function triggerInstallOrGuide() {
+    if (deferredInstallPrompt) {
+      try {
+        deferredInstallPrompt.prompt();
+        const choice = await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        if (choice && choice.outcome === "accepted") {
+          hideInstallBanner();
+          showToast("MILA Hospitality installed to your Home Screen!");
+          return;
+        }
+      } catch {
+        // Fallback to manual guide
+      }
+    }
+    openInstallGuideSheet();
+  }
+
+  function hideInstallBanner() {
+    const bar = document.getElementById("installBanner");
+    if (bar) bar.classList.add("hidden");
+    const authBtn = document.getElementById("authInstallBtn");
+    if (authBtn) authBtn.classList.add("hidden");
+  }
+
+  function setupInstallUi() {
+    if (isRunningStandalone()) {
+      hideInstallBanner();
+      return;
+    }
+    const authBtn = document.getElementById("authInstallBtn");
+    if (authBtn) {
+      authBtn.classList.remove("hidden");
+      authBtn.addEventListener("click", triggerInstallOrGuide);
+    }
+    const bar = document.getElementById("installBanner");
+    let dismissed = false;
+    try {
+      dismissed = window.sessionStorage.getItem(INSTALL_DISMISS_KEY) === "1";
+    } catch {
+      dismissed = false;
+    }
+    if (bar && !dismissed) {
+      bar.classList.remove("hidden");
+    }
+    const actionBtn = document.getElementById("installBannerAction");
+    if (actionBtn) actionBtn.addEventListener("click", triggerInstallOrGuide);
+    const dismissBtn = document.getElementById("installBannerDismiss");
+    if (dismissBtn) {
+      dismissBtn.addEventListener("click", () => {
+        if (bar) bar.classList.add("hidden");
+        try {
+          window.sessionStorage.setItem(INSTALL_DISMISS_KEY, "1");
+        } catch {
+          // ignore
+        }
+      });
+    }
+
+    window.addEventListener("beforeinstallprompt", (ev) => {
+      ev.preventDefault();
+      deferredInstallPrompt = ev;
+      if (bar) bar.classList.remove("hidden");
+    });
+
+    window.addEventListener("appinstalled", () => {
+      deferredInstallPrompt = null;
+      hideInstallBanner();
+      renderDrawer();
+      showToast("MILA Hospitality added to your Home Screen!");
+    });
+  }
+
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    const doRegister = () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    };
+    if (document.readyState === "complete") doRegister();
+    else window.addEventListener("load", doRegister, { once: true });
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
+    registerServiceWorker();
+    setupInstallUi();
+
     document.getElementById("otpRequestForm").addEventListener("submit", handleSendOtp);
     document.getElementById("otpVerifyForm").addEventListener("submit", handleVerifyOtp);
     document.getElementById("changeEmailBtn").addEventListener("click", () => {

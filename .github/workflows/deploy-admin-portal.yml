@@ -1,6 +1,13 @@
-name: Deploy Standalone MILA Admin Portal
+name: Deploy MILA iPhone Web App & Admin Portal
 
 on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "ios-app/**"
+      - "admin-portal/**"
+      - "index.html"
+      - ".github/workflows/deploy-admin-portal.yml"
   workflow_dispatch:
     inputs:
       supabase_url:
@@ -22,7 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-admin-portal:
+  deploy-pages:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -35,28 +42,33 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Inject Supabase Public Config from Repository Secrets
+      - name: Build GitHub Pages bundle with live Supabase public config
         env:
           INPUT_SUPABASE_URL: ${{ inputs.supabase_url }}
           INPUT_SUPABASE_ANON_KEY: ${{ inputs.supabase_anon_key }}
           SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          mkdir -p _pages_dist
+          cp -r admin-portal _pages_dist/admin-portal
+          cp -r ios-app _pages_dist/ios-app
+          cp index.html _pages_dist/index.html
+          touch _pages_dist/.nojekyll
           node -e '
             const fs = require("fs");
             const cfg = {
               supabaseUrl: (process.env.INPUT_SUPABASE_URL || process.env.SECRET_SUPABASE_URL || "").trim(),
               supabaseAnonKey: (process.env.INPUT_SUPABASE_ANON_KEY || process.env.SECRET_SUPABASE_ANON_KEY || "").trim()
             };
-            fs.writeFileSync("admin-portal/config.js", "window.MILA_ADMIN_CONFIG = " + JSON.stringify(cfg, null, 2) + ";\n");
-            fs.writeFileSync("admin-portal/.nojekyll", "");
+            fs.writeFileSync("_pages_dist/admin-portal/config.js", "window.MILA_ADMIN_CONFIG = " + JSON.stringify(cfg, null, 2) + ";\n");
+            fs.writeFileSync("_pages_dist/ios-app/config.js", "window.MILA_IOS_CONFIG = " + JSON.stringify(cfg, null, 2) + ";\n");
           '
 
-      - name: Upload Admin Portal static bundle
+      - name: Upload MILA Web Apps bundle
         uses: actions/upload-pages-artifact@v3
         with:
-          path: admin-portal
+          path: _pages_dist
 
-      - name: Deploy Standalone Admin Portal to GitHub Pages
+      - name: Deploy MILA iPhone Web App & Admin Portal to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

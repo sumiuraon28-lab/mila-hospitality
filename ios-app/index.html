@@ -4,21 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#141816" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="MILA Hospitality" />
+  <meta name="apple-mobile-web-app-title" content="MILA" />
   <meta name="format-detection" content="telephone=no" />
   <title>MILA Hospitality Consultant</title>
   <link rel="manifest" href="./manifest.json" />
-  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
-  <link rel="apple-touch-icon" href="./icon.svg" />
-  <link rel="stylesheet" href="./styles.css?v=20261127a" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+  <link rel="stylesheet" href="./styles.css?v=20261127b" />
 </head>
 <body>
   <!-- Auth Gate (Matches MILA Android Email OTP Entry) -->
   <section id="authGateView" class="auth-gate hidden">
     <div class="auth-card">
-      <div class="crest-badge">M</div>
+      <img class="crest-badge-img" src="./apple-touch-icon.png" alt="MILA Hospitality Crest" />
       <div class="eyebrow">MILA HOSPITALITY CONSULTANT</div>
       <h1 class="serif">Creating Excellence in Hospitality</h1>
       <p class="muted-copy">Sign in with a 6-digit email verification code to explore MILA Consultancy, MILA Talent, and MILA Academy.</p>
@@ -47,18 +48,21 @@
         <button id="changeEmailBtn" type="button" class="btn btn-outline btn-full">Change Email / Resend Code</button>
       </form>
 
-      <button id="guestBrowseBtn" type="button" class="btn btn-ghost btn-full" style="margin-top:8px;">
+      <button id="guestBrowseBtn" type="button" class="btn btn-ghost btn-full" style="margin-top:4px;">
         Browse Services Without Signing In
+      </button>
+      <button id="authInstallBtn" type="button" class="btn btn-outline btn-full hidden">
+        Install MILA App on iPhone (Free)
       </button>
     </div>
   </section>
 
-  <!-- Main MILA iPhone App Shell -->
+  <!-- Main MILA Installable iPhone Web App Shell -->
   <div id="appShell" class="app-shell hidden">
     <header class="app-topbar">
       <button id="menuBtn" class="icon-btn" type="button" aria-label="Open menu">☰</button>
       <div class="brand-lockup">
-        <div class="brand-crest-sm">M</div>
+        <img class="brand-crest-img" src="./apple-touch-icon.png" alt="MILA Crest" />
         <div class="brand-text">
           <div class="brand-title">MILA HOSPITALITY CONSULTANT</div>
           <div class="brand-sub">Creating Excellence in Hospitality</div>
@@ -66,6 +70,17 @@
       </div>
       <button id="accountBtn" class="avatar-btn" type="button" aria-label="Account">MI</button>
     </header>
+
+    <!-- Smart Free iPhone Install Bar (auto-hides once installed to Home Screen) -->
+    <div id="installBanner" class="install-banner hidden">
+      <img class="install-banner-icon" src="./apple-touch-icon.png" alt="MILA App Icon" />
+      <div class="install-banner-copy">
+        <div class="install-banner-title">Install MILA on Your iPhone</div>
+        <div class="install-banner-sub">Free full-screen app icon — no App Store required</div>
+      </div>
+      <button id="installBannerAction" type="button" class="btn btn-gold btn-sm">Install</button>
+      <button id="installBannerDismiss" type="button" class="icon-btn install-dismiss-btn" aria-label="Dismiss install bar">✕</button>
+    </div>
 
     <main id="screenRoot" class="screen-root"></main>
 
@@ -97,7 +112,7 @@
   <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="sideDrawer" class="side-drawer" aria-label="All Pages">
     <div class="drawer-header">
-      <div class="brand-crest-sm">M</div>
+      <img class="brand-crest-img" src="./apple-touch-icon.png" alt="MILA Crest" />
       <div>
         <div class="eyebrow">MILA HOSPITALITY</div>
         <div id="drawerUserLabel" class="drawer-user">Guest</div>
@@ -124,6 +139,6 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="./config.js"></script>
-  <script src="./app.js?v=20261127a"></script>
+  <script src="./app.js?v=20261127b"></script>
 </body>
 </html>

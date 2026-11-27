@@ -765,3 +765,143 @@ html, body {
   font-weight: 600;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
+
+/* Official Crest Image Badges */
+.crest-badge-img {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  border: 1.5px solid var(--gold);
+  object-fit: cover;
+  display: block;
+}
+
+.brand-crest-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--gold);
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+
+/* Luxury Photo Hero Card */
+.hero-card-photo {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  border: 1px solid var(--border-strong);
+  min-height: 230px;
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg-deep);
+}
+
+.hero-bg-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.52);
+}
+
+.hero-scrim {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 24px 20px 22px;
+  background: linear-gradient(180deg, rgba(14, 17, 15, 0.15) 0%, rgba(14, 17, 15, 0.88) 70%, rgba(14, 17, 15, 0.96) 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hero-scrim h1 {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.18;
+  color: var(--ivory);
+}
+
+/* Free iPhone Install Banner */
+.install-banner {
+  background: linear-gradient(135deg, rgba(212, 175, 122, 0.18), rgba(27, 32, 29, 0.96));
+  border-bottom: 1px solid var(--border-strong);
+  padding: 10px 12px 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.install-banner-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--gold);
+  flex-shrink: 0;
+}
+
+.install-banner-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.install-banner-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ivory);
+  line-height: 1.2;
+}
+
+.install-banner-sub {
+  font-size: 11px;
+  color: var(--ivory-muted);
+  margin-top: 2px;
+}
+
+.install-dismiss-btn {
+  min-width: 36px;
+  min-height: 36px;
+  font-size: 15px;
+  color: var(--stone);
+}
+
+/* 3-Step Visual Install Guide */
+.install-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.install-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: var(--bg-deep);
+  font-weight: 800;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.install-step-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ivory);
+}
+
+.install-step-desc {
+  font-size: 13px;
+  color: var(--ivory-muted);
+  margin-top: 2px;
+}
+
