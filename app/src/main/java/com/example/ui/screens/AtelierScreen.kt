@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.CaseStudy
 import com.example.data.ConsultancyService
 import com.example.data.ConsultationServiceType
+import com.example.data.ContactDetails
 import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
 import com.example.data.PromoBanner
@@ -71,6 +72,7 @@ fun AtelierScreen(
     defaultReviewerName: String = "",
     isSubmittingReview: Boolean = false,
     onSubmitReview: (reviewerName: String, engagementContext: String, rating: Int, quote: String, onSuccess: () -> Unit) -> Unit = { _, _, _, _, _ -> },
+    contactDetails: ContactDetails = ContactDetails(),
     modifier: Modifier = Modifier
 ) {
     var selectedCaseStudy by remember { mutableStateOf<CaseStudy?>(null) }
@@ -341,6 +343,7 @@ fun AtelierScreen(
                 HomeContactInfoCard(
                     onContactUs = { onNavigateRoute("contact_us") },
                     onIndustries = { onNavigateRoute("industries_we_serve") },
+                    contactDetails = contactDetails,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
             }
@@ -410,12 +413,13 @@ private fun PracticeSnapshotSection(
     onViewAllServices: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    if (services.isEmpty()) return
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         SectionHeading(
-            eyebrow = "Service Categories (01 – 08)",
+            eyebrow = "Service Categories (${services.size})",
             title = "Complete Consultancy Catalogue",
             subtitle = "Tap any service category to view its detailed scope, owner benefits, deliverables, and photography."
         )
@@ -425,7 +429,7 @@ private fun PracticeSnapshotSection(
                 onClick = { onSelectServicePage(service) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("home_service_${service.type.name}"),
+                    .testTag("home_service_${service.slug}"),
                 colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
                 border = BorderStroke(1.dp, MilaGoldSubtle),
                 shape = MaterialTheme.shapes.medium
@@ -443,7 +447,9 @@ private fun PracticeSnapshotSection(
                             text = "${service.numberBadge}. ${service.title}",
                             style = MaterialTheme.typography.titleMedium.copy(color = MilaIvory)
                         )
-                        Text(service.subtitle, style = MaterialTheme.typography.bodySmall.copy(color = MilaChampagneGold))
+                        if (service.subtitle.isNotBlank()) {
+                            Text(service.subtitle, style = MaterialTheme.typography.bodySmall.copy(color = MilaChampagneGold))
+                        }
                         Text(
                             text = "${service.divisionName} • Timeline: ${service.typicalTimeline}",
                             style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
@@ -460,7 +466,7 @@ private fun PracticeSnapshotSection(
         }
 
         GoldOutlineButton(
-            text = "Explore All 8 Services",
+            text = "Explore All ${services.size} Services",
             onClick = onViewAllServices,
             testTag = "view_all_advisory_button",
             modifier = Modifier.fillMaxWidth()

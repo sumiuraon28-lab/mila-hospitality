@@ -1,0 +1,177 @@
+name: Build MILA Hospitality iOS App (.ipa)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "Build mode: unsigned-simulator (no Apple cert needed) or signed-ipa (App Store / TestFlight)"
+        required: true
+        default: "unsigned-simulator"
+        type: choice
+        options:
+          - unsigned-simulator
+          - signed-ipa
+      upload_to_testflight:
+        description: "Automatically upload signed IPA to Apple TestFlight (requires ASC_API_* secrets)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Inject Supabase public config into ios-app/config.js
+        env:
+          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cfg = {
+              supabaseUrl: (process.env.SECRET_SUPABASE_URL || "").trim(),
+              supabaseAnonKey: (process.env.SECRET_SUPABASE_ANON_KEY || "").trim()
+            };
+            fs.writeFileSync("ios-app/config.js", "window.MILA_IOS_CONFIG = " + JSON.stringify(cfg, null, 2) + ";\n");
+          '
+
+      - name: Install Capacitor & Generate Native Xcode Project
+        working-directory: ios-wrapper
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Build Unsigned iOS Simulator Bundle (Verification)
+        if: ${{ inputs.build_mode == 'unsigned-simulator' }}
+        working-directory: ios-wrapper/ios/App
+        run: |
+          if [ -d "App.xcworkspace" ]; then
+            TARGET_FLAGS="-workspace App.xcworkspace"
+          else
+            TARGET_FLAGS="-project App.xcodeproj"
+          fi
+          xcodebuild \
+            $TARGET_FLAGS \
+            -scheme App \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload Unsigned Simulator .app Artifact
+        if: ${{ inputs.build_mode == 'unsigned-simulator' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILA-Hospitality-iOS-Simulator
+          path: ios-wrapper/ios/App/build/Build/Products/Release-iphonesimulator/App.app
+          retention-days: 14
+
+      - name: Install Apple Signing Certificate & Provisioning Profile
+        if: ${{ inputs.build_mode == 'signed-ipa' }}
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [ -z "$APPLE_CERT_P12_BASE64" ] || [ -z "$APPLE_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "::error::Missing APPLE_CERT_P12_BASE64 or APPLE_PROVISIONING_PROFILE_BASE64 secrets. See ios-wrapper/IOS_APP_STORE_GUIDE.md."
+            exit 1
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/mila-signing.keychain-db"
+          KEYCHAIN_PASS="$(openssl rand -hex 16)"
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          echo "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/dist.p12" -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision")")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin <<< "$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision")")
+          cp "$RUNNER_TEMP/profile.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID.mobileprovision"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
+      - name: Archive & Export Signed App Store .ipa
+        if: ${{ inputs.build_mode == 'signed-ipa' }}
+        working-directory: ios-wrapper/ios/App
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::Missing APPLE_TEAM_ID secret. See ios-wrapper/IOS_APP_STORE_GUIDE.md."
+            exit 1
+          fi
+          if [ -d "App.xcworkspace" ]; then
+            TARGET_FLAGS="-workspace App.xcworkspace"
+          else
+            TARGET_FLAGS="-project App.xcodeproj"
+          fi
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.milahospitality.ios</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild archive \
+            $TARGET_FLAGS \
+            -scheme App \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/MILA.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/MILA.xcarchive" \
+            -exportPath "$RUNNER_TEMP/ipa-out" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Upload Signed .ipa Artifact
+        if: ${{ inputs.build_mode == 'signed-ipa' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILA-Hospitality-iOS-IPA
+          path: ${{ runner.temp }}/ipa-out/*.ipa
+          retention-days: 30
+
+      - name: Upload Signed .ipa to Apple TestFlight (Optional)
+        if: ${{ inputs.build_mode == 'signed-ipa' && inputs.upload_to_testflight == true }}
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
+          IPA_FILE=$(ls "$RUNNER_TEMP"/ipa-out/*.ipa | head -n 1)
+          xcrun altool --upload-app -f "$IPA_FILE" -t ios --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"

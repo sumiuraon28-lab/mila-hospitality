@@ -19,9 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.BusinessCenter
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.FormatQuote
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.PersonSearch
+import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.Schedule
@@ -54,6 +56,7 @@ import com.example.R
 import com.example.data.BusinessDivision
 import com.example.data.CaseStudy
 import com.example.data.ConsultationServiceType
+import com.example.data.ContactDetails
 import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
 import com.example.data.Testimonial
@@ -574,6 +577,7 @@ fun CaseStudyCard(
 fun HomeContactInfoCard(
     onContactUs: () -> Unit,
     onIndustries: () -> Unit,
+    contactDetails: ContactDetails = ContactDetails(),
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -597,6 +601,30 @@ fun HomeContactInfoCard(
                 text = "Partner With MILA Across India",
                 style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
             )
+            if (contactDetails.phone.isNotBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.Phone, contentDescription = null, tint = MilaChampagneGold, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = contactDetails.phone,
+                        style = MaterialTheme.typography.bodySmall.copy(color = MilaIvory, fontWeight = FontWeight.Medium)
+                    )
+                }
+            }
+            if (contactDetails.email.isNotBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.Email, contentDescription = null, tint = MilaChampagneGold, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = contactDetails.email,
+                        style = MaterialTheme.typography.bodySmall.copy(color = MilaIvory, fontWeight = FontWeight.Medium)
+                    )
+                }
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -613,7 +641,7 @@ fun HomeContactInfoCard(
             ) {
                 Icon(Icons.Rounded.Schedule, contentDescription = null, tint = MilaChampagneGold, modifier = Modifier.size(18.dp))
                 Text(
-                    text = "Advisory & recruitment enquiries answered within 1 business day (IST).",
+                    text = contactDetails.responseWindow,
                     style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
                 )
             }

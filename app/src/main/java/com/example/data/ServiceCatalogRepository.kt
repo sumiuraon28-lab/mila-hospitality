@@ -77,12 +77,12 @@ class ServiceCatalogRepository(
     companion object {
         fun resolveDrawableForKey(imageKey: String): Int = when (imageKey) {
             "palace_resort" -> R.drawable.img_palace_resort_1795637233184
-            "fine_dining" -> R.drawable.img_fine_dining_1795637233362
+            "fine_dining", "dining_interior" -> R.drawable.img_fine_dining_1795637233362
             "mixology_bar" -> R.drawable.img_mixology_bar_1795637233060
             "hospitality_training" -> R.drawable.img_hospitality_training_1795638556708
-            "hero_hotel" -> R.drawable.img_hero_hotel_1795637232836
-            "executive_recruitment" -> R.drawable.img_executive_recruitment_1795638556883
-            "concept_design" -> R.drawable.img_concept_design_1795638557169
+            "hero_hotel", "operations_mgmt" -> R.drawable.img_hero_hotel_1795637232836
+            "executive_recruitment", "talent_recruitment" -> R.drawable.img_executive_recruitment_1795638556883
+            "concept_design", "concept_dev" -> R.drawable.img_concept_design_1795638557169
             "management_solutions" -> R.drawable.img_management_solutions_1795638555350
             else -> R.drawable.img_hero_hotel_1795637232836
         }

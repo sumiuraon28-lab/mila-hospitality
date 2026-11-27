@@ -66,3 +66,22 @@ fun SitePageContent.toPromoBanner(): PromoBanner {
         published = published
     )
 }
+
+const val CONTACT_DETAILS_PAGE_KEY = "contact_details"
+
+data class ContactDetails(
+    val email: String = "mdkhanrashid2@gmail.com",
+    val phone: String = "+916363262421",
+    val responseWindow: String = "Partner Response Window: Within 1 Business Day (IST)",
+    val deskNote: String = "Reach our partner desk directly by phone or email for consultancy mandates, pre-opening advisory, or talent partnerships."
+)
+
+fun SitePageContent.isContactDetails(): Boolean =
+    pageKey.equals(CONTACT_DETAILS_PAGE_KEY, ignoreCase = true)
+
+fun SitePageContent.toContactDetails(): ContactDetails = ContactDetails(
+    email = eyebrow.trim(),
+    phone = headline.trim(),
+    responseWindow = subheadline.trim().ifBlank { "Partner Response Window: Within 1 Business Day (IST)" },
+    deskNote = bodyCopy.trim()
+)

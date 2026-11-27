@@ -1,0 +1,10 @@
+{
+  "appId": "com.milahospitality.ios",
+  "appName": "MILA Hospitality",
+  "webDir": "../ios-app",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#141816",
+    "preferredContentMode": "mobile"
+  }
+}

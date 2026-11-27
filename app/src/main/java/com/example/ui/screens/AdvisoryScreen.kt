@@ -72,13 +72,18 @@ fun AdvisoryScreen(
     onRequestMandate: (ConsultationServiceType) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val divisionFilters = remember {
-        listOf("All (8)", "MILA Consultancy", "MILA Academy & Expertise", "MILA Talent")
+    val allFilterLabel = "All (${services.size})"
+    val divisionFilters = remember(services) {
+        val dynamicDivisions = services.map { it.divisionName }.filter { it.isNotBlank() }.distinct()
+        val orderedDefaults = listOf("MILA Consultancy", "MILA Academy & Expertise", "MILA Talent")
+            .filter { it in dynamicDivisions }
+        val extraDivisions = dynamicDivisions.filterNot { it in orderedDefaults }
+        listOf(allFilterLabel) + orderedDefaults + extraDivisions
     }
-    var selectedFilter by remember { mutableStateOf("All (8)") }
+    var selectedFilter by remember { mutableStateOf("ALL") }
 
     val visibleServices = remember(services, selectedFilter) {
-        if (selectedFilter == "All (8)") {
+        if (selectedFilter == "ALL") {
             services
         } else {
             services.filter { it.divisionName == selectedFilter }
@@ -93,7 +98,7 @@ fun AdvisoryScreen(
         item {
             SectionHeading(
                 eyebrow = "MILA Consultancy • Complete Service Catalogue",
-                title = "Eight Specialized Hospitality Practices",
+                title = "Specialized Hospitality Practices",
                 subtitle = "Select any practice to open its dedicated advisory page, inspect deliverables and owner benefits, or submit an enquiry."
             )
         }
@@ -101,10 +106,11 @@ fun AdvisoryScreen(
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(divisionFilters) { filter ->
-                    val selected = selectedFilter == filter
+                    val filterKey = if (filter == allFilterLabel) "ALL" else filter
+                    val selected = selectedFilter == filterKey
                     FilterChip(
                         selected = selected,
-                        onClick = { selectedFilter = filter },
+                        onClick = { selectedFilter = filterKey },
                         label = { Text(filter) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MilaChampagneGold,
@@ -118,18 +124,43 @@ fun AdvisoryScreen(
                             borderColor = MilaCharcoalBorder,
                             selectedBorderColor = MilaChampagneGold
                         ),
-                        modifier = Modifier.testTag("services_filter_$filter")
+                        modifier = Modifier.testTag("services_filter_$filterKey")
                     )
                 }
             }
         }
 
-        items(visibleServices, key = { it.id }) { service ->
-            ConsultancyServiceCard(
-                service = service,
-                onViewDetails = { onOpenServiceDetail(service) },
-                onRequestMandate = { onRequestMandate(service.type) }
-            )
+        if (visibleServices.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
+                    border = BorderStroke(1.dp, MilaGoldSubtle),
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "No Published Services in This Category",
+                            style = MaterialTheme.typography.titleMedium.copy(color = MilaIvory)
+                        )
+                        Text(
+                            text = "Services published from the MILA Admin Panel will appear here automatically.",
+                            style = MaterialTheme.typography.bodyMedium.copy(color = MilaIvoryMuted)
+                        )
+                    }
+                }
+            }
+        } else {
+            items(visibleServices, key = { it.id }) { service ->
+                ConsultancyServiceCard(
+                    service = service,
+                    onViewDetails = { onOpenServiceDetail(service) },
+                    onRequestMandate = { onRequestMandate(service.type) }
+                )
+            }
         }
 
         item {
@@ -159,17 +190,27 @@ private fun ConsultancyServiceCard(
         shape = MaterialTheme.shapes.large
     ) {
         Column {
+            val customBitmap = rememberRemoteOrDataBitmap(service.imageUrl)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(166.dp)
             ) {
-                Image(
-                    painter = painterResource(id = service.imageRes),
-                    contentDescription = service.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (customBitmap != null) {
+                    Image(
+                        bitmap = customBitmap,
+                        contentDescription = service.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = service.imageRes),
+                        contentDescription = service.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -203,39 +244,45 @@ private fun ConsultancyServiceCard(
                     text = service.title,
                     style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
                 )
-                Text(
-                    text = service.subtitle,
-                    style = MaterialTheme.typography.titleSmall.copy(color = MilaChampagneGold)
-                )
-                Text(
-                    text = service.summary,
-                    style = MaterialTheme.typography.bodyMedium.copy(color = MilaIvoryMuted)
-                )
-                HorizontalDivider(color = MilaGoldSubtle)
-                Text(
-                    text = "HIGHLIGHTED DELIVERABLES",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = MilaChampagneGold,
-                        letterSpacing = 1.4.sp
+                if (service.subtitle.isNotBlank()) {
+                    Text(
+                        text = service.subtitle,
+                        style = MaterialTheme.typography.titleSmall.copy(color = MilaChampagneGold)
                     )
-                )
-                service.deliverables.take(3).forEach { item ->
-                    Row(
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = null,
-                            tint = MilaChampagneGold,
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .size(16.dp)
+                }
+                if (service.summary.isNotBlank()) {
+                    Text(
+                        text = service.summary,
+                        style = MaterialTheme.typography.bodyMedium.copy(color = MilaIvoryMuted)
+                    )
+                }
+                if (service.deliverables.isNotEmpty()) {
+                    HorizontalDivider(color = MilaGoldSubtle)
+                    Text(
+                        text = "HIGHLIGHTED DELIVERABLES",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = MilaChampagneGold,
+                            letterSpacing = 1.4.sp
                         )
-                        Text(
-                            text = item,
-                            style = MaterialTheme.typography.bodySmall.copy(color = MilaIvory)
-                        )
+                    )
+                    service.deliverables.take(3).forEach { item ->
+                        Row(
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = MilaChampagneGold,
+                                modifier = Modifier
+                                    .padding(top = 2.dp)
+                                    .size(16.dp)
+                            )
+                            Text(
+                                text = item,
+                                style = MaterialTheme.typography.bodySmall.copy(color = MilaIvory)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))

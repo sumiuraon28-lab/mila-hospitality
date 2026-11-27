@@ -107,12 +107,17 @@ object MilaCatalog {
         get() = ServiceCatalogDefaults.services
 
     fun serviceBySlug(slug: String, catalog: List<ConsultancyService> = services): ConsultancyService =
-        catalog.firstOrNull { it.slug == slug || it.id == slug } ?: catalog.first()
+        catalog.firstOrNull { it.slug == slug || it.id == slug }
+            ?: catalog.firstOrNull()
+            ?: services.first()
 
     fun serviceByType(
         type: ConsultationServiceType,
         catalog: List<ConsultancyService> = services
-    ): ConsultancyService = catalog.firstOrNull { it.type == type } ?: catalog.first()
+    ): ConsultancyService =
+        catalog.firstOrNull { it.type == type }
+            ?: catalog.firstOrNull()
+            ?: services.first()
 
     val industries = listOf(
         IndustrySector(

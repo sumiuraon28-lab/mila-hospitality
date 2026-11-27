@@ -105,6 +105,7 @@ import com.example.data.CaseStudy
 import com.example.data.ClientProfile
 import com.example.data.ConsultancyService
 import com.example.data.ConsultationServiceType
+import com.example.data.ContactDetails
 import com.example.data.EnquiryConfirmation
 import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
@@ -179,24 +180,36 @@ private val primaryTabs = listOf(
     MilaPrimaryTab(ROUTE_CONTACT, R.string.nav_contact, Icons.Rounded.ContactMail, Icons.Outlined.ContactMail, "nav_contact")
 )
 
-private val allPagesDirectory = listOf(
-    DrawerNavEntry(ROUTE_HOME, "Home", "MILA Overview", Icons.Outlined.Home),
-    DrawerNavEntry(ROUTE_ABOUT, "About Us", "MILA Overview", Icons.Outlined.Info),
-    DrawerNavEntry(ROUTE_SERVICES, "Our Services (MILA Consultancy)", "Three Business Divisions", Icons.Outlined.BusinessCenter),
-    DrawerNavEntry(ROUTE_CAREERS, "Careers (MILA Talent)", "Three Business Divisions", Icons.Outlined.WorkOutline),
-    DrawerNavEntry(ROUTE_EXPERTISE, "Our Expertise (MILA Academy)", "Three Business Divisions", Icons.Outlined.WorkspacePremium),
-    DrawerNavEntry(ROUTE_INDUSTRIES, "Industries We Serve", "Sectors & Portfolio", Icons.Outlined.Apartment),
-    DrawerNavEntry(ROUTE_PORTFOLIO, "Our Portfolio", "Sectors & Portfolio", Icons.Outlined.CollectionsBookmark),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/hospitality-pre-opening-consultancy", "01. Hospitality Pre-Opening", "8 Service Categories", Icons.Outlined.Apartment),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/restaurant-cafe-development", "02. Restaurant & Café Development", "8 Service Categories", Icons.Outlined.BusinessCenter),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/bar-beverage-consultancy", "03. Bar & Beverage Consultancy", "8 Service Categories", Icons.Outlined.WorkspacePremium),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/hospitality-training", "04. Hospitality Training", "8 Service Categories", Icons.Outlined.Info),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/operations-management", "05. Operations Management", "8 Service Categories", Icons.Outlined.BusinessCenter),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/recruitment-talent-acquisition", "06. Recruitment & Talent", "8 Service Categories", Icons.Outlined.PersonSearch),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/business-concept-development", "07. Business & Concept Dev.", "8 Service Categories", Icons.Outlined.CollectionsBookmark),
-    DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/hospitality-management-solutions", "08. Management Solutions", "8 Service Categories", Icons.Outlined.Apartment),
-    DrawerNavEntry(ROUTE_CONTACT, "Contact Us", "Connect", Icons.Outlined.ContactMail)
-)
+private fun buildDrawerDirectory(services: List<ConsultancyService>): List<DrawerNavEntry> {
+    val staticTop = listOf(
+        DrawerNavEntry(ROUTE_HOME, "Home", "MILA Overview", Icons.Outlined.Home),
+        DrawerNavEntry(ROUTE_ABOUT, "About Us", "MILA Overview", Icons.Outlined.Info),
+        DrawerNavEntry(ROUTE_SERVICES, "Our Services (MILA Consultancy)", "Three Business Divisions", Icons.Outlined.BusinessCenter),
+        DrawerNavEntry(ROUTE_CAREERS, "Careers (MILA Talent)", "Three Business Divisions", Icons.Outlined.WorkOutline),
+        DrawerNavEntry(ROUTE_EXPERTISE, "Our Expertise (MILA Academy)", "Three Business Divisions", Icons.Outlined.WorkspacePremium),
+        DrawerNavEntry(ROUTE_INDUSTRIES, "Industries We Serve", "Sectors & Portfolio", Icons.Outlined.Apartment),
+        DrawerNavEntry(ROUTE_PORTFOLIO, "Our Portfolio", "Sectors & Portfolio", Icons.Outlined.CollectionsBookmark)
+    )
+    val serviceEntries = services.map { svc ->
+        val icon = when (svc.type) {
+            ConsultationServiceType.HOSPITALITY_PRE_OPENING -> Icons.Outlined.Apartment
+            ConsultationServiceType.BAR_BEVERAGE_CONSULTANCY -> Icons.Outlined.WorkspacePremium
+            ConsultationServiceType.HOSPITALITY_TRAINING -> Icons.Outlined.Info
+            ConsultationServiceType.RECRUITMENT_TALENT_ACQUISITION -> Icons.Outlined.PersonSearch
+            ConsultationServiceType.BUSINESS_CONCEPT_DEVELOPMENT -> Icons.Outlined.CollectionsBookmark
+            else -> Icons.Outlined.BusinessCenter
+        }
+        DrawerNavEntry(
+            route = "$ROUTE_SERVICE_DETAIL_BASE/${svc.slug}",
+            label = "${svc.numberBadge}. ${svc.title}",
+            group = "Our Services (${services.size})",
+            icon = icon
+        )
+    }
+    return staticTop + serviceEntries + listOf(
+        DrawerNavEntry(ROUTE_CONTACT, "Contact Us", "Connect", Icons.Outlined.ContactMail)
+    )
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -291,12 +304,16 @@ fun MilaAppRoot() {
     val portfolio by catalogViewModel.portfolio.collectAsStateWithLifecycle()
     val testimonials by catalogViewModel.testimonials.collectAsStateWithLifecycle()
     val promoBanners by catalogViewModel.promoBanners.collectAsStateWithLifecycle()
+    val contactDetails by catalogViewModel.contactDetails.collectAsStateWithLifecycle()
 
     DisposableEffect(lifecycleOwner, catalogViewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                catalogViewModel.refreshServices()
+                catalogViewModel.refreshPortfolio()
                 catalogViewModel.refreshTestimonials()
                 catalogViewModel.refreshBanners()
+                catalogViewModel.refreshContactDetails()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -372,10 +389,12 @@ fun MilaAppRoot() {
                     supabaseCandidateSession = supabaseCandidateSession,
                     supabaseTalentClient = supabaseTalentClient,
                     services = services,
+                    onRefreshServices = { catalogViewModel.refreshServices() },
                     vacancies = vacancies,
                     isRefreshingVacancies = isRefreshingVacancies,
                     onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                     portfolio = portfolio,
+                    onRefreshPortfolio = { catalogViewModel.refreshPortfolio() },
                     testimonials = testimonials,
                     onRefreshTestimonials = { catalogViewModel.refreshTestimonials() },
                     onSubmitReview = { accessToken, userId, name, email, ctx, rating, quote ->
@@ -383,6 +402,8 @@ fun MilaAppRoot() {
                     },
                     promoBanners = promoBanners,
                     onRefreshBanners = { catalogViewModel.refreshBanners() },
+                    contactDetails = contactDetails,
+                    onRefreshContactDetails = { catalogViewModel.refreshContactDetails() },
                     shouldShowAutoPopup = { id -> catalogViewModel.shouldShowAutoPopup(id) },
                     onAutoPopupShown = { id -> catalogViewModel.markAutoPopupShown(id) },
                     onSignOut = handleMemberSignOut,
@@ -397,10 +418,12 @@ fun MilaAppRoot() {
                 supabaseCandidateSession = supabaseCandidateSession,
                 supabaseTalentClient = supabaseTalentClient,
                 services = services,
+                onRefreshServices = { catalogViewModel.refreshServices() },
                 vacancies = vacancies,
                 isRefreshingVacancies = isRefreshingVacancies,
                 onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                 portfolio = portfolio,
+                onRefreshPortfolio = { catalogViewModel.refreshPortfolio() },
                 testimonials = testimonials,
                 onRefreshTestimonials = { catalogViewModel.refreshTestimonials() },
                 onSubmitReview = { accessToken, userId, name, email, ctx, rating, quote ->
@@ -408,6 +431,8 @@ fun MilaAppRoot() {
                 },
                 promoBanners = promoBanners,
                 onRefreshBanners = { catalogViewModel.refreshBanners() },
+                contactDetails = contactDetails,
+                onRefreshContactDetails = { catalogViewModel.refreshContactDetails() },
                 shouldShowAutoPopup = { id -> catalogViewModel.shouldShowAutoPopup(id) },
                 onAutoPopupShown = { id -> catalogViewModel.markAutoPopupShown(id) },
                 onSignOut = handleMemberSignOut,
@@ -426,10 +451,12 @@ private fun MilaAppShell(
     supabaseCandidateSession: SupabaseCandidateSession?,
     supabaseTalentClient: SupabaseTalentClient,
     services: List<ConsultancyService>,
+    onRefreshServices: () -> Unit,
     vacancies: List<HospitalityRole>,
     isRefreshingVacancies: Boolean,
     onRefreshVacancies: () -> Unit,
     portfolio: List<CaseStudy>,
+    onRefreshPortfolio: () -> Unit,
     testimonials: List<Testimonial>,
     onRefreshTestimonials: () -> Unit,
     onSubmitReview: suspend (
@@ -443,6 +470,8 @@ private fun MilaAppShell(
     ) -> Result<Unit>,
     promoBanners: List<PromoBanner>,
     onRefreshBanners: () -> Unit,
+    contactDetails: ContactDetails,
+    onRefreshContactDetails: () -> Unit,
     shouldShowAutoPopup: (String) -> Boolean,
     onAutoPopupShown: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -560,11 +589,13 @@ private fun MilaAppShell(
         source?.trim()?.take(2)?.uppercase()
     }
 
+    val drawerDirectory = remember(services) { buildDrawerDirectory(services) }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             MilaDrawerSheetContent(
-                entries = allPagesDirectory,
+                entries = drawerDirectory,
                 currentRoute = currentRoute,
                 onSelectRoute = { route ->
                     scope.launch { drawerState.close() }
@@ -692,8 +723,11 @@ private fun MilaAppShell(
                             composable(ROUTE_HOME) {
                                 var isSubmittingReview by remember { mutableStateOf(false) }
                                 LaunchedEffect(Unit) {
+                                    onRefreshServices()
+                                    onRefreshPortfolio()
                                     onRefreshBanners()
                                     onRefreshTestimonials()
+                                    onRefreshContactDetails()
                                 }
                                 val reviewerDefaultName = clientProfile?.fullName?.takeIf { it.isNotBlank() }
                                     ?: supabaseSession?.metadata?.fullName?.takeIf { it.isNotBlank() && !it.equals("MILA Guest", ignoreCase = true) }
@@ -740,6 +774,7 @@ private fun MilaAppShell(
                                             }
                                         }
                                     },
+                                    contactDetails = contactDetails,
                                     onOpenServiceDetail = { service ->
                                         navigateToRoute("$ROUTE_SERVICE_DETAIL_BASE/${service.slug}")
                                     },
@@ -756,6 +791,9 @@ private fun MilaAppShell(
                                 )
                             }
                             composable(ROUTE_SERVICES) {
+                                LaunchedEffect(Unit) {
+                                    onRefreshServices()
+                                }
                                 AdvisoryScreen(
                                     services = services,
                                     onOpenServiceDetail = { service ->
@@ -767,6 +805,9 @@ private fun MilaAppShell(
                                 )
                             }
                             composable(ROUTE_SERVICE_DETAIL) { backStackEntry ->
+                                LaunchedEffect(Unit) {
+                                    onRefreshServices()
+                                }
                                 val slug = backStackEntry.arguments?.getString("serviceSlug").orEmpty()
                                 val selectedService = MilaCatalog.serviceBySlug(slug, services)
                                 ServiceDetailScreen(
@@ -797,6 +838,9 @@ private fun MilaAppShell(
                                 )
                             }
                             composable(ROUTE_PORTFOLIO) {
+                                LaunchedEffect(Unit) {
+                                    onRefreshPortfolio()
+                                }
                                 OurPortfolioScreen(
                                     caseStudies = portfolio,
                                     onCommissionSimilar = { serviceType ->
@@ -856,7 +900,10 @@ private fun MilaAppShell(
                                 )
                             }
                             composable(ROUTE_CONTACT) {
-                                ContactUsScreen()
+                                LaunchedEffect(Unit) {
+                                    onRefreshContactDetails()
+                                }
+                                ContactUsScreen(contactDetails = contactDetails)
                             }
                             composable(ROUTE_CLIENT_LOGIN) {
                                 ClientLoginScreen(

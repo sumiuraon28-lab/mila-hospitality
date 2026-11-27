@@ -127,7 +127,7 @@ private fun paletteForTheme(theme: PromoBannerTheme): BannerPalette = when (them
 }
 
 @Composable
-private fun rememberPromoBannerBitmap(imageUrl: String?): ImageBitmap? {
+internal fun rememberRemoteOrDataBitmap(imageUrl: String?): ImageBitmap? {
     val bitmap by produceState<ImageBitmap?>(initialValue = null, key1 = imageUrl) {
         value = null
         val src = imageUrl?.trim().orEmpty()
@@ -140,7 +140,7 @@ private fun rememberPromoBannerBitmap(imageUrl: String?): ImageBitmap? {
                         if (comma <= 0) return@runCatching null
                         Base64.decode(src.substring(comma + 1), Base64.DEFAULT)
                     }
-                    src.startsWith("https://", ignoreCase = true) || src.startsWith("http://", ignoreCase = true) -> {
+                    src.startsWith("https://", ignoreCase = true) -> {
                         val req = Request.Builder().url(src).get().build()
                         bannerImageClient.newCall(req).execute().use { res ->
                             if (!res.isSuccessful) return@runCatching null
@@ -155,6 +155,10 @@ private fun rememberPromoBannerBitmap(imageUrl: String?): ImageBitmap? {
     }
     return bitmap
 }
+
+@Composable
+private fun rememberPromoBannerBitmap(imageUrl: String?): ImageBitmap? =
+    rememberRemoteOrDataBitmap(imageUrl)
 
 @Composable
 fun TopPromoBannerSection(

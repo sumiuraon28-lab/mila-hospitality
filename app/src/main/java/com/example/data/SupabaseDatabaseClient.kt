@@ -421,23 +421,24 @@ class SupabaseDatabaseClient(
                         published = o.optBoolean("published", true)
                     )
                     val resolvedType = offering.resolvedServiceType
-                    val fallback = MilaCatalog.services.firstOrNull { it.type == resolvedType }
-                        ?: MilaCatalog.services.first()
-                    val resolvedImageKey = offering.imageKey.ifBlank { fallback.imageKey }
+                    val matchedDefault = MilaCatalog.services.firstOrNull { it.slug == offering.slug }
+                    val resolvedImageKey = offering.imageKey.ifBlank { matchedDefault?.imageKey ?: "hero_hotel" }
+                    val cleanSlug = offering.slug.ifBlank { offering.id.ifBlank { "service-${idx + 1}" } }
+                    val cleanTitle = offering.title.ifBlank { matchedDefault?.title ?: "Hospitality Service" }
                     ConsultancyService(
-                        id = offering.id.ifBlank { fallback.id },
-                        sortOrder = offering.sortOrder.toInt().coerceIn(1, 100),
+                        id = offering.id.ifBlank { cleanSlug },
+                        sortOrder = offering.sortOrder.toInt().coerceIn(1, 999),
                         type = resolvedType,
-                        slug = offering.slug.ifBlank { fallback.slug },
-                        divisionName = offering.divisionName.ifBlank { fallback.divisionName },
-                        title = offering.title.ifBlank { fallback.title },
-                        subtitle = offering.subtitle.ifBlank { fallback.subtitle },
-                        summary = offering.summary.ifBlank { fallback.summary },
-                        detailedDescription = offering.detailedDescription.ifBlank { fallback.detailedDescription },
-                        servicesIncluded = offering.servicesIncluded.ifEmpty { fallback.servicesIncluded },
-                        ownerBenefits = offering.ownerBenefits.ifEmpty { fallback.ownerBenefits },
-                        deliverables = offering.deliverables.ifEmpty { fallback.deliverables },
-                        typicalTimeline = offering.typicalTimeline.ifBlank { fallback.typicalTimeline },
+                        slug = cleanSlug,
+                        divisionName = offering.divisionName.ifBlank { "MILA Consultancy" },
+                        title = cleanTitle,
+                        subtitle = offering.subtitle,
+                        summary = offering.summary,
+                        detailedDescription = offering.detailedDescription.ifBlank { offering.summary },
+                        servicesIncluded = offering.servicesIncluded,
+                        ownerBenefits = offering.ownerBenefits,
+                        deliverables = offering.deliverables,
+                        typicalTimeline = offering.typicalTimeline.ifBlank { "Custom Engagement" },
                         imageKey = resolvedImageKey,
                         imageRes = ServiceCatalogRepository.resolveDrawableForKey(resolvedImageKey),
                         imageUrl = offering.imageUrl
@@ -606,6 +607,31 @@ class SupabaseDatabaseClient(
                         ctaLabel = o.optString("cta_label", "Explore Details"),
                         published = o.optBoolean("published", true)
                     ).toPromoBanner()
+                }
+            }
+    }
+
+    suspend fun fetchPublishedContactDetails(): Result<ContactDetails?> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext Result.success(null)
+        executeGetArray("/rest/v1/website_content?page_key=eq.$CONTACT_DETAILS_PAGE_KEY&published=eq.true&limit=1", null)
+            .map { arr ->
+                if (arr.length() == 0) {
+                    null
+                } else {
+                    val o = arr.getJSONObject(0)
+                    SitePageContent(
+                        id = o.optString("id"),
+                        pageKey = o.optString("page_key"),
+                        pageTitle = o.optString("page_title"),
+                        eyebrow = o.optString("eyebrow"),
+                        headline = o.optString("headline"),
+                        subheadline = o.optString("subheadline"),
+                        bodyCopy = o.optString("body_copy"),
+                        heroImageKey = o.optString("hero_image_key", "contact_desk"),
+                        heroImageUrl = o.optString("hero_image_url").takeIf { it.isNotBlank() && it != "null" },
+                        ctaLabel = o.optString("cta_label", "Contact Us"),
+                        published = o.optBoolean("published", true)
+                    ).toContactDetails()
                 }
             }
     }

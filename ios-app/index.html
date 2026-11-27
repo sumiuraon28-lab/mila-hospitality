@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#141816" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="MILA Hospitality" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>MILA Hospitality Consultant</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <link rel="stylesheet" href="./styles.css?v=20261127a" />
+</head>
+<body>
+  <!-- Auth Gate (Matches MILA Android Email OTP Entry) -->
+  <section id="authGateView" class="auth-gate hidden">
+    <div class="auth-card">
+      <div class="crest-badge">M</div>
+      <div class="eyebrow">MILA HOSPITALITY CONSULTANT</div>
+      <h1 class="serif">Creating Excellence in Hospitality</h1>
+      <p class="muted-copy">Sign in with a 6-digit email verification code to explore MILA Consultancy, MILA Talent, and MILA Academy.</p>
+
+      <div id="authError" class="alert-box alert-error hidden"></div>
+      <div id="authSuccess" class="alert-box alert-success hidden"></div>
+
+      <form id="otpRequestForm" class="stack-12">
+        <div class="field">
+          <label for="authFullName">Full Name (Optional for Returning Members)</label>
+          <input id="authFullName" type="text" autocomplete="name" placeholder="Your full name" />
+        </div>
+        <div class="field">
+          <label for="authEmail">Email Address *</label>
+          <input id="authEmail" type="email" required autocomplete="email" placeholder="you@company.com" />
+        </div>
+        <button id="sendOtpBtn" type="submit" class="btn btn-gold btn-full">Send 6-Digit Login Code</button>
+      </form>
+
+      <form id="otpVerifyForm" class="stack-12 hidden">
+        <div class="field">
+          <label for="authOtpCode">6-Digit Code Sent to Your Email *</label>
+          <input id="authOtpCode" type="text" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="Enter 6-digit code" required />
+        </div>
+        <button id="verifyOtpBtn" type="submit" class="btn btn-gold btn-full">Verify &amp; Enter MILA App</button>
+        <button id="changeEmailBtn" type="button" class="btn btn-outline btn-full">Change Email / Resend Code</button>
+      </form>
+
+      <button id="guestBrowseBtn" type="button" class="btn btn-ghost btn-full" style="margin-top:8px;">
+        Browse Services Without Signing In
+      </button>
+    </div>
+  </section>
+
+  <!-- Main MILA iPhone App Shell -->
+  <div id="appShell" class="app-shell hidden">
+    <header class="app-topbar">
+      <button id="menuBtn" class="icon-btn" type="button" aria-label="Open menu">☰</button>
+      <div class="brand-lockup">
+        <div class="brand-crest-sm">M</div>
+        <div class="brand-text">
+          <div class="brand-title">MILA HOSPITALITY CONSULTANT</div>
+          <div class="brand-sub">Creating Excellence in Hospitality</div>
+        </div>
+      </div>
+      <button id="accountBtn" class="avatar-btn" type="button" aria-label="Account">MI</button>
+    </header>
+
+    <main id="screenRoot" class="screen-root"></main>
+
+    <nav class="tab-bar" aria-label="Main Navigation">
+      <button class="tab-item active" data-tab="home" type="button">
+        <span class="tab-icon">⌂</span>
+        <span class="tab-label">Home</span>
+      </button>
+      <button class="tab-item" data-tab="services" type="button">
+        <span class="tab-icon">◈</span>
+        <span class="tab-label">Services</span>
+      </button>
+      <button class="tab-item" data-tab="portfolio" type="button">
+        <span class="tab-icon">◫</span>
+        <span class="tab-label">Portfolio</span>
+      </button>
+      <button class="tab-item" data-tab="careers" type="button">
+        <span class="tab-icon">✦</span>
+        <span class="tab-label">Careers</span>
+      </button>
+      <button class="tab-item" data-tab="contact" type="button">
+        <span class="tab-icon">☏</span>
+        <span class="tab-label">Contact</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Slide-out Side Drawer -->
+  <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="sideDrawer" class="side-drawer" aria-label="All Pages">
+    <div class="drawer-header">
+      <div class="brand-crest-sm">M</div>
+      <div>
+        <div class="eyebrow">MILA HOSPITALITY</div>
+        <div id="drawerUserLabel" class="drawer-user">Guest</div>
+      </div>
+      <button id="closeDrawerBtn" class="icon-btn" type="button" aria-label="Close menu">✕</button>
+    </div>
+    <div id="drawerNavList" class="drawer-nav"></div>
+  </aside>
+
+  <!-- Reusable Bottom Sheet / Modal -->
+  <div id="sheetBackdrop" class="sheet-backdrop hidden">
+    <div class="sheet-box" role="dialog" aria-modal="true">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 id="sheetTitle" class="serif">Details</h3>
+        <button id="sheetCloseBtn" class="btn btn-ghost btn-sm" type="button">Close</button>
+      </div>
+      <div id="sheetBody" class="sheet-body"></div>
+      <div id="sheetFooter" class="sheet-footer"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="./config.js"></script>
+  <script src="./app.js?v=20261127a"></script>
+</body>
+</html>

@@ -60,11 +60,83 @@
   const buildUrl = ((window.MILA_ADMIN_CONFIG && window.MILA_ADMIN_CONFIG.supabaseUrl) || "").trim().replace(/\/+$/, "");
   const buildKey = ((window.MILA_ADMIN_CONFIG && window.MILA_ADMIN_CONFIG.supabaseAnonKey) || "").trim();
 
-  // In-memory runtime state only (never persists auth JWT or passwords to storage)
+  // In-memory runtime state (short-lived access token stays strictly in memory;
+  // rotating Supabase refresh_token is stored in IndexedDB until explicit Sign Out)
+  const SESSION_DB_NAME = "mila_admin_session_db_v1";
+  const SESSION_STORE_NAME = "sessions";
+  const SESSION_RECORD_KEY = "active";
+
+  function openSessionDb() {
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      const req = indexedDB.open(SESSION_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(SESSION_STORE_NAME)) {
+          db.createObjectStore(SESSION_STORE_NAME, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("Could not open session DB"));
+    });
+  }
+
+  async function readSavedSession() {
+    try {
+      const db = await openSessionDb();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(SESSION_STORE_NAME, "readonly");
+        const req = tx.objectStore(SESSION_STORE_NAME).get(SESSION_RECORD_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function writeSavedSession(patch) {
+    try {
+      const existing = (await readSavedSession()) || { id: SESSION_RECORD_KEY };
+      const next = Object.assign({}, existing, patch, {
+        id: SESSION_RECORD_KEY,
+        updatedAt: Date.now()
+      });
+      if (!next.refreshToken) return;
+      const db = await openSessionDb();
+      await new Promise((resolve) => {
+        const tx = db.transaction(SESSION_STORE_NAME, "readwrite");
+        tx.objectStore(SESSION_STORE_NAME).put(next);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {
+      // Best-effort persistence (e.g. restricted private browsing)
+    }
+  }
+
+  async function clearSavedSession() {
+    try {
+      const db = await openSessionDb();
+      await new Promise((resolve) => {
+        const tx = db.transaction(SESSION_STORE_NAME, "readwrite");
+        tx.objectStore(SESSION_STORE_NAME).delete(SESSION_RECORD_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+
   const state = {
     supabaseUrl: buildUrl || savedEndpoint.url,
     supabaseAnonKey: (buildKey && !isSecretSupabaseKey(buildKey)) ? buildKey : savedEndpoint.key,
     token: null,
+    tokenExpiresAt: 0,
     admin: null,
     activeModule: "overview",
     searchQuery: "",
@@ -145,6 +217,7 @@
     { id: "services", label: "Services", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "portfolio", label: "Portfolio Projects", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "testimonials", label: "Reviews & Testimonials", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
+    { id: "contact_info", label: "Contact Email & Phone", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "team", label: "Team Members", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "pages", label: "Website Content", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "admins", label: "Admin Users & Invites", group: "Governance", roles: ["SUPER_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN"] },
@@ -271,10 +344,146 @@
     return MODULES.filter((m) => m.roles.includes(state.admin.role));
   }
 
-  // Supabase REST / Auth / Storage HTTP Client
-  async function apiFetch(path, options) {
+  // Concurrency-safe Supabase session refresh (rotating single-use refresh tokens)
+  let refreshSessionPromise = null;
+
+  async function verifyAdminTokenOnServer(accessToken) {
+    const verifyRes = await fetch(state.supabaseUrl + "/rest/v1/rpc/verify_admin_session", {
+      method: "POST",
+      headers: {
+        apikey: state.supabaseAnonKey,
+        Authorization: "Bearer " + accessToken,
+        "Content-Type": "application/json"
+      },
+      body: "{}"
+    });
+    const verifyJson = await verifyRes.json().catch(() => null);
+    return { status: verifyRes.status, ok: verifyRes.ok, json: verifyJson };
+  }
+
+  function applyAuthenticatedAdmin(verifyJson, fallbackEmail) {
+    state.admin = {
+      id: verifyJson.id || "",
+      uid: verifyJson.uid || "",
+      email: verifyJson.email || (fallbackEmail || "").trim().toLowerCase(),
+      displayName: verifyJson.display_name || "MILA Administrator",
+      role: verifyJson.role || "REPORTING_ADMIN"
+    };
+    document.getElementById("sidebarRoleLabel").textContent = ROLE_LABELS[state.admin.role] || state.admin.role;
+    document.getElementById("sidebarAdminName").textContent = state.admin.displayName;
+    document.getElementById("sidebarAdminEmail").textContent = state.admin.email;
+  }
+
+  function forceSessionExpiredSignOut(reason) {
+    stopLiveSyncPolling();
+    clearSavedSession();
+    state.token = null;
+    state.tokenExpiresAt = 0;
+    state.admin = null;
+    document.getElementById("dashboardView").classList.add("hidden");
+    document.getElementById("loginView").classList.remove("hidden");
+    if (reason) showToast(reason);
+  }
+
+  async function refreshAdminSession(options) {
+    const requireVerify = Boolean(options && options.requireVerify);
+    if (refreshSessionPromise) return refreshSessionPromise;
+
+    refreshSessionPromise = (async () => {
+      if (!isValidSupabaseUrl(state.supabaseUrl) || !state.supabaseAnonKey) {
+        return { ok: false, fatal: false, message: "Supabase endpoint not configured." };
+      }
+      const saved = await readSavedSession();
+      if (!saved || !saved.refreshToken) {
+        return { ok: false, fatal: true, message: "No saved administrator session." };
+      }
+
+      try {
+        const res = await fetch(state.supabaseUrl + "/auth/v1/token?grant_type=refresh_token", {
+          method: "POST",
+          headers: {
+            apikey: state.supabaseAnonKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ refresh_token: saved.refreshToken })
+        });
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok || !json || !json.access_token) {
+          const isAuthRevoked = res.status === 400 || res.status === 401 || res.status === 403;
+          if (isAuthRevoked) {
+            await clearSavedSession();
+          }
+          return {
+            ok: false,
+            fatal: isAuthRevoked,
+            message: (json && (json.error_description || json.msg || json.message)) || "Session expired. Please sign in again."
+          };
+        }
+
+        const nextToken = json.access_token;
+        const expiresInSec = Number(json.expires_in || 3600);
+        state.token = nextToken;
+        state.tokenExpiresAt = Date.now() + Math.max(60, expiresInSec) * 1000;
+
+        // Immediately persist rotated refresh token so mobile Chrome never drops the session
+        if (json.refresh_token) {
+          await writeSavedSession({ refreshToken: json.refresh_token });
+        }
+
+        if (requireVerify || !state.admin) {
+          const verified = await verifyAdminTokenOnServer(nextToken);
+          if (verified.status === 404) {
+            return {
+              ok: false,
+              fatal: false,
+              message: "MILA database functions are not installed yet."
+            };
+          }
+          if (!verified.ok || !verified.json || verified.json.authorized !== true || verified.json.active === false) {
+            await fetch(state.supabaseUrl + "/auth/v1/logout", {
+              method: "POST",
+              headers: { apikey: state.supabaseAnonKey, Authorization: "Bearer " + nextToken }
+            }).catch(() => {});
+            await clearSavedSession();
+            return {
+              ok: false,
+              fatal: true,
+              message: "Administrator access revoked or inactive."
+            };
+          }
+          applyAuthenticatedAdmin(verified.json, (json.user && json.user.email) || "");
+        }
+
+        return { ok: true, fatal: false, savedModule: saved.activeModule || "overview" };
+      } catch {
+        // Offline or transient network hiccup: keep saved refresh token intact!
+        return { ok: false, fatal: false, message: "Network temporarily unavailable." };
+      }
+    })();
+
+    try {
+      return await refreshSessionPromise;
+    } finally {
+      refreshSessionPromise = null;
+    }
+  }
+
+  async function ensureFreshTokenIfNeeded() {
+    if (!state.token || !state.admin) return;
+    // Proactively refresh if within 5 minutes of JWT expiry
+    if (state.tokenExpiresAt > 0 && Date.now() >= state.tokenExpiresAt - 300_000) {
+      await refreshAdminSession({ requireVerify: false });
+    }
+  }
+
+  // Supabase REST / Auth / Storage HTTP Client (with automatic 401 refresh + retry)
+  async function apiFetch(path, options, _retried) {
     if (!isValidSupabaseUrl(state.supabaseUrl) || !state.supabaseAnonKey) {
       throw new Error("Configure your Supabase Project URL and Publishable/Anon Key first.");
+    }
+    if (!_retried) {
+      await ensureFreshTokenIfNeeded();
     }
     const headers = Object.assign(
       {
@@ -287,6 +496,20 @@
       headers.Authorization = "Bearer " + state.token;
     }
     const res = await fetch(state.supabaseUrl + path, Object.assign({}, options || {}, { headers }));
+    if (res.status === 401 && !_retried && state.token) {
+      const refreshed = await refreshAdminSession({ requireVerify: false });
+      if (refreshed.ok) {
+        const retryOpts = Object.assign({}, options || {});
+        if (retryOpts.headers) {
+          retryOpts.headers = Object.assign({}, retryOpts.headers);
+          delete retryOpts.headers.Authorization;
+        }
+        return apiFetch(path, retryOpts, true);
+      }
+      if (refreshed.fatal) {
+        forceSessionExpiredSignOut("Your administrator session ended. Please sign in again.");
+      }
+    }
     const text = await res.text();
     let json = null;
     try {
@@ -352,19 +575,30 @@
       return;
     }
     try {
+      await ensureFreshTokenIfNeeded();
       showToast("Downloading CV for " + candidate.full_name + "...");
       const cleanPath = String(candidate.cv_storage_path).trim().replace(/^\/+/, "").replace(/^candidate-cvs\//, "");
       const encodedPath = cleanPath.split("/").map((seg) => encodeURIComponent(seg)).join("/");
-      const res = await fetch(
-        state.supabaseUrl + "/storage/v1/object/authenticated/candidate-cvs/" + encodedPath,
-        {
-          method: "GET",
-          headers: {
-            apikey: state.supabaseAnonKey,
-            Authorization: "Bearer " + state.token
-          }
+      const cvUrl = state.supabaseUrl + "/storage/v1/object/authenticated/candidate-cvs/" + encodedPath;
+      let res = await fetch(cvUrl, {
+        method: "GET",
+        headers: {
+          apikey: state.supabaseAnonKey,
+          Authorization: "Bearer " + state.token
         }
-      );
+      });
+      if (res.status === 401) {
+        const ref = await refreshAdminSession({ requireVerify: false });
+        if (ref.ok) {
+          res = await fetch(cvUrl, {
+            method: "GET",
+            headers: {
+              apikey: state.supabaseAnonKey,
+              Authorization: "Bearer " + state.token
+            }
+          });
+        }
+      }
       if (!res.ok) {
         const errText = await res.text();
         let errMsg = "Could not download CV (" + res.status + ").";
@@ -433,20 +667,11 @@
       savePublicEndpoint(state.supabaseUrl, state.supabaseAnonKey);
 
       const token = authJson.access_token;
-      const verifyRes = await fetch(state.supabaseUrl + "/rest/v1/rpc/verify_admin_session", {
-        method: "POST",
-        headers: {
-          apikey: state.supabaseAnonKey,
-          Authorization: "Bearer " + token,
-          "Content-Type": "application/json"
-        },
-        body: "{}"
-      });
-      const verifyJson = await verifyRes.json().catch(() => null);
-      if (verifyRes.status === 404) {
+      const verified = await verifyAdminTokenOnServer(token);
+      if (verified.status === 404) {
         throw new Error("MILA database tables/functions are not installed in this Supabase project yet. Run supabase/ALL_IN_ONE_SETUP.sql in your Supabase SQL Editor first.");
       }
-      if (!verifyRes.ok || !verifyJson || verifyJson.authorized !== true || verifyJson.active === false) {
+      if (!verified.ok || !verified.json || verified.json.authorized !== true || verified.json.active === false) {
         await fetch(state.supabaseUrl + "/auth/v1/logout", {
           method: "POST",
           headers: { apikey: state.supabaseAnonKey, Authorization: "Bearer " + token }
@@ -455,24 +680,25 @@
       }
 
       state.token = token;
-      state.admin = {
-        id: verifyJson.id || "",
-        uid: verifyJson.uid || "",
-        email: verifyJson.email || email.trim().toLowerCase(),
-        displayName: verifyJson.display_name || "MILA Administrator",
-        role: verifyJson.role || "REPORTING_ADMIN"
-      };
+      state.tokenExpiresAt = Date.now() + Math.max(60, Number(authJson.expires_in || 3600)) * 1000;
+      applyAuthenticatedAdmin(verified.json, email);
+
+      // Persist rotating refresh token in IndexedDB so admin stays signed in until Sign Out
+      if (authJson.refresh_token) {
+        await writeSavedSession({
+          refreshToken: authJson.refresh_token,
+          activeModule: "overview"
+        });
+      }
 
       document.getElementById("adminPassword").value = "";
       document.getElementById("loginView").classList.add("hidden");
       document.getElementById("dashboardView").classList.remove("hidden");
-      document.getElementById("sidebarRoleLabel").textContent = ROLE_LABELS[state.admin.role] || state.admin.role;
-      document.getElementById("sidebarAdminName").textContent = state.admin.displayName;
-      document.getElementById("sidebarAdminEmail").textContent = state.admin.email;
 
       state.activeModule = "overview";
       state.knownEnquiryIds = new Set();
       state.knownUserIds = new Set();
+      state.knownReviewIds = new Set();
       state.hasInitialSync = false;
       await refreshAllData(false, false);
       startLiveSyncPolling();
@@ -493,14 +719,59 @@
     }
   }
 
+  async function restoreSavedAdminSession() {
+    if (!isValidSupabaseUrl(state.supabaseUrl) || !state.supabaseAnonKey) return false;
+    const saved = await readSavedSession();
+    if (!saved || !saved.refreshToken) return false;
+
+    const submitBtn = document.getElementById("loginSubmitBtn");
+    const errBox = document.getElementById("loginError");
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Restoring Admin Session...";
+    }
+    try {
+      const res = await refreshAdminSession({ requireVerify: true });
+      if (!res.ok || !state.admin || !state.token) {
+        if (!res.fatal && res.message && errBox) {
+          errBox.textContent = res.message + " Reconnect and reload or sign in again.";
+          errBox.classList.remove("hidden");
+        }
+        return false;
+      }
+
+      const allowed = allowedModules().map((m) => m.id);
+      const targetModule = res.savedModule && allowed.includes(res.savedModule) ? res.savedModule : "overview";
+      state.activeModule = targetModule;
+      state.knownEnquiryIds = new Set();
+      state.knownUserIds = new Set();
+      state.knownReviewIds = new Set();
+      state.hasInitialSync = false;
+
+      document.getElementById("loginView").classList.add("hidden");
+      document.getElementById("dashboardView").classList.remove("hidden");
+      await refreshAllData(false, false);
+      startLiveSyncPolling();
+      return true;
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Sign In to Admin Dashboard";
+      }
+    }
+  }
+
   async function handleSignOut() {
     stopLiveSyncPolling();
     const oldToken = state.token;
     state.token = null;
+    state.tokenExpiresAt = 0;
     state.admin = null;
     state.knownEnquiryIds = new Set();
     state.knownUserIds = new Set();
+    state.knownReviewIds = new Set();
     state.hasInitialSync = false;
+    await clearSavedSession();
     Object.keys(state.data).forEach((k) => {
       state.data[k] = Array.isArray(state.data[k]) ? [] : null;
     });
@@ -810,7 +1081,8 @@
       case "portfolio": return d.portfolio.length;
       case "testimonials": return d.testimonials.length;
       case "team": return d.team.length;
-      case "pages": return (d.pages || []).filter((p) => !isPromoBannerRow(p)).length;
+      case "pages": return (d.pages || []).filter((p) => !isPromoBannerRow(p) && !isContactDetailsRow(p)).length;
+      case "contact_info": return 1;
       case "admins": return d.admins.length;
       case "logs": return d.logs.length;
       default: return null;
@@ -839,6 +1111,7 @@
               state.activeModule = mod.id;
               state.searchQuery = "";
               state.statusFilter = "ALL";
+              writeSavedSession({ activeModule: mod.id });
               document.getElementById("sidebar").classList.remove("open");
               const backdrop = document.getElementById("sidebarBackdrop");
               if (backdrop) backdrop.classList.add("hidden");
@@ -2574,7 +2847,469 @@
     );
   }
 
-  // Generic CMS list renderer for Services, Portfolio, Team, Pages
+  function parseLinesToArray(raw) {
+    return String(raw || "")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^[\s•\-\*]+/, "").trim())
+      .filter(Boolean);
+  }
+
+  function arrayToLines(arr) {
+    if (!Array.isArray(arr)) return "";
+    return arr.map((s) => String(s || "").trim()).filter(Boolean).join("\n");
+  }
+
+  function isSafeServiceImageSource(raw) {
+    const val = String(raw || "").trim();
+    if (!val) return true;
+    if (val.startsWith("data:image/")) return true;
+    try {
+      const parsed = new URL(val);
+      return parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  const SERVICE_DIVISION_OPTIONS = [
+    "MILA Consultancy",
+    "MILA Academy & Expertise",
+    "MILA Talent"
+  ];
+
+  const SERVICE_TYPE_OPTIONS = [
+    { key: "HOSPITALITY_PRE_OPENING", label: "Hospitality Pre-Opening Consultancy" },
+    { key: "RESTAURANT_CAFE_DEVELOPMENT", label: "Restaurant and Café Development" },
+    { key: "BAR_BEVERAGE_CONSULTANCY", label: "Bar and Beverage Consultancy" },
+    { key: "HOSPITALITY_TRAINING", label: "Hospitality Training" },
+    { key: "OPERATIONS_MANAGEMENT", label: "Operations Management" },
+    { key: "RECRUITMENT_TALENT_ACQUISITION", label: "Recruitment and Talent Acquisition" },
+    { key: "BUSINESS_CONCEPT_DEVELOPMENT", label: "Business and Concept Development" },
+    { key: "HOSPITALITY_MANAGEMENT_SOLUTIONS", label: "Hospitality Management Solutions" }
+  ];
+
+  const SERVICE_IMAGE_KEY_OPTIONS = [
+    { key: "palace_resort", label: "Luxury Palace & Resort" },
+    { key: "fine_dining", label: "Fine Dining & Café Interior" },
+    { key: "mixology_bar", label: "Mixology & Craft Bar" },
+    { key: "hospitality_training", label: "Hospitality Training Academy" },
+    { key: "hero_hotel", label: "Luxury Hotel Lobby & Operations" },
+    { key: "executive_recruitment", label: "Executive Recruitment & Talent" },
+    { key: "concept_design", label: "Concept & Space Design" },
+    { key: "management_solutions", label: "Hospitality Management Solutions" }
+  ];
+
+  function renderServicesManager(container) {
+    const writable = canWrite("services");
+    const allServices = (state.data.services || []).slice().sort((a, b) => Number(a.sort_order || 99) - Number(b.sort_order || 99));
+    const publishedCount = allServices.filter((s) => s.published !== false).length;
+    const hiddenCount = allServices.length - publishedCount;
+
+    const addBtn = writable
+      ? el("button", {
+          className: "btn btn-gold",
+          type: "button",
+          text: "+ Add New Service",
+          onClick: () => openServiceEditorModal(null)
+        })
+      : null;
+
+    container.appendChild(
+      renderModuleHeader(
+        "Services Control Center",
+        "Every service shown in the MILA app is managed live here (" + allServices.length + " total • " + publishedCount + " live • " + hiddenCount + " hidden). Edit, reorder, hide, add, or delete any service anytime.",
+        addBtn
+      )
+    );
+
+    const searchInput = el("input", {
+      className: "search-input",
+      type: "search",
+      placeholder: "Search services by title, division, or summary...",
+      value: state.searchQuery
+    });
+    const listWrap = el("div", { className: "records-list" });
+
+    function drawList() {
+      clearNode(listWrap);
+      const q = (searchInput.value || "").trim().toLowerCase();
+      const filtered = allServices.filter((s) => {
+        if (!q) return true;
+        const hay = [s.title, s.subtitle, s.division_name, s.summary, s.typical_timeline].join(" ").toLowerCase();
+        return hay.includes(q);
+      });
+
+      if (!filtered.length) {
+        listWrap.appendChild(
+          el("div", {
+            className: "empty-state",
+            text: allServices.length
+              ? "No services match your search."
+              : "No services exist yet. Tap '+ Add New Service' to publish your first service to the MILA app."
+          })
+        );
+        return;
+      }
+
+      filtered.forEach((svc, idx) => {
+        const badgeNum = String(svc.sort_order || idx + 1).padStart(2, "0");
+        const includedCount = Array.isArray(svc.services_included) ? svc.services_included.length : 0;
+        const benefitsCount = Array.isArray(svc.owner_benefits) ? svc.owner_benefits.length : 0;
+        const deliverablesCount = Array.isArray(svc.deliverables) ? svc.deliverables.length : 0;
+
+        const actions = [];
+        if (writable) {
+          actions.push(
+            el("button", {
+              className: "btn btn-gold btn-sm",
+              type: "button",
+              text: "Edit Service",
+              onClick: () => openServiceEditorModal(svc)
+            }),
+            el("button", {
+              className: "btn btn-outline btn-sm",
+              type: "button",
+              text: svc.published ? "Hide from App" : "Publish Live",
+              onClick: async () => {
+                try {
+                  await mutateTable(
+                    "PATCH",
+                    "/rest/v1/services?id=eq." + encodeURIComponent(svc.id),
+                    { published: !svc.published },
+                    {
+                      module: "SERVICE_MANAGEMENT",
+                      action: "UPDATE",
+                      targetId: svc.id,
+                      summary: (svc.published ? "Hid" : "Published") + " service: " + (svc.title || svc.slug)
+                    }
+                  );
+                  showToast(svc.published ? "Service hidden from the MILA app." : "Service published live to the MILA app!");
+                  await refreshAllData(false);
+                } catch (err) {
+                  showToast(err.message || "Could not update service visibility.");
+                }
+              }
+            }),
+            el("button", {
+              className: "btn btn-danger btn-sm",
+              type: "button",
+              text: "Delete",
+              onClick: () =>
+                confirmDelete(
+                  "Delete Service Permanently?",
+                  "Delete '" + (svc.title || "Service") + "'? It will be removed immediately from the MILA app.",
+                  async () => {
+                    await mutateTable(
+                      "DELETE",
+                      "/rest/v1/services?id=eq." + encodeURIComponent(svc.id),
+                      null,
+                      {
+                        module: "SERVICE_MANAGEMENT",
+                        action: "DELETE",
+                        targetId: svc.id,
+                        summary: "Deleted service: " + (svc.title || svc.slug)
+                      }
+                    );
+                    showToast("Service deleted from MILA app.");
+                  }
+                )
+            })
+          );
+        }
+
+        const customPhoto = svc.image_url && isSafeServiceImageSource(svc.image_url)
+          ? el("img", {
+              src: svc.image_url,
+              alt: svc.title || "Service cover",
+              style: "width:100%;max-height:140px;object-fit:cover;border-radius:10px;border:1px solid rgba(212,175,122,0.28);margin-bottom:10px;"
+            })
+          : null;
+
+        listWrap.appendChild(
+          el("div", { className: "record-card" }, [
+            customPhoto,
+            el("div", { className: "record-top" }, [
+              el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center;" }, [
+                pill("#" + badgeNum, "gold"),
+                pill(svc.published ? "LIVE IN APP" : "HIDDEN", svc.published ? "emerald" : "muted"),
+                svc.division_name ? pill(svc.division_name, "muted") : null
+              ]),
+              el("span", { className: "record-small", text: svc.typical_timeline || "" })
+            ]),
+            el("div", { className: "record-title", text: svc.title || "Untitled Service" }),
+            svc.subtitle ? el("div", { className: "record-small", style: "color:#D4AF7A;margin-top:2px;", text: svc.subtitle }) : null,
+            svc.summary ? el("div", { className: "record-meta", style: "margin-top:6px;", text: svc.summary }) : null,
+            el("div", {
+              className: "record-small",
+              style: "margin-top:8px;",
+              text: includedCount + " Services Included • " + benefitsCount + " Owner Benefits • " + deliverablesCount + " Deliverables"
+            }),
+            actions.length ? el("div", { className: "record-actions" }, actions) : null
+          ])
+        );
+      });
+    }
+
+    searchInput.addEventListener("input", () => {
+      state.searchQuery = searchInput.value;
+      drawList();
+    });
+
+    container.appendChild(el("div", { className: "toolbar" }, [searchInput]));
+    container.appendChild(listWrap);
+    drawList();
+  }
+
+  function openServiceEditorModal(existing) {
+    const isEdit = Boolean(existing && existing.id);
+    const nextOrder = (state.data.services || []).length + 1;
+
+    const modalErr = el("div", { className: "error-box hidden" });
+    const fTitle = el("input", {
+      value: existing ? (existing.title || "") : "",
+      placeholder: "e.g. Hospitality Pre-Opening Consultancy"
+    });
+    const fSubtitle = el("input", {
+      value: existing ? (existing.subtitle || "") : "",
+      placeholder: "e.g. Turnkey Critical Path & Opening Governance"
+    });
+
+    const fDivision = el(
+      "select",
+      { style: "width:100%;" },
+      SERVICE_DIVISION_OPTIONS.map((d) => el("option", { value: d, text: d }))
+    );
+    const initDiv = existing && existing.division_name ? existing.division_name : "MILA Consultancy";
+    if (!SERVICE_DIVISION_OPTIONS.includes(initDiv)) {
+      fDivision.appendChild(el("option", { value: initDiv, text: initDiv }));
+    }
+    fDivision.value = initDiv;
+
+    const fServiceType = el(
+      "select",
+      { style: "width:100%;" },
+      SERVICE_TYPE_OPTIONS.map((o) => el("option", { value: o.key, text: o.label }))
+    );
+    fServiceType.value = (existing && existing.service_type) || "HOSPITALITY_PRE_OPENING";
+
+    const fTimeline = el("input", {
+      value: existing ? (existing.typical_timeline || "") : "6 – 12 Weeks",
+      placeholder: "e.g. 4 – 12 Months"
+    });
+    const fOrder = el("input", {
+      type: "number",
+      value: String(existing && existing.sort_order ? existing.sort_order : nextOrder)
+    });
+    const fSummary = el("textarea", {
+      rows: "3",
+      placeholder: "Short summary shown on the Services list card..."
+    });
+    fSummary.value = existing ? (existing.summary || "") : "";
+
+    const fDetailed = el("textarea", {
+      rows: "4",
+      placeholder: "Detailed overview & advisory mandate shown on the Service Detail page..."
+    });
+    fDetailed.value = existing ? (existing.detailed_description || "") : "";
+
+    const fIncluded = el("textarea", {
+      rows: "4",
+      placeholder: "Enter one bullet point per line..."
+    });
+    fIncluded.value = existing ? arrayToLines(existing.services_included) : "";
+
+    const fBenefits = el("textarea", {
+      rows: "4",
+      placeholder: "Enter one owner benefit per line..."
+    });
+    fBenefits.value = existing ? arrayToLines(existing.owner_benefits) : "";
+
+    const fDeliverables = el("textarea", {
+      rows: "4",
+      placeholder: "Enter one deliverable per line..."
+    });
+    fDeliverables.value = existing ? arrayToLines(existing.deliverables) : "";
+
+    const fImageKey = el(
+      "select",
+      { style: "width:100%;" },
+      SERVICE_IMAGE_KEY_OPTIONS.map((o) => el("option", { value: o.key, text: o.label }))
+    );
+    const currentImageKey = existing && existing.image_key ? existing.image_key : "palace_resort";
+    const keyAliasMap = {
+      dining_interior: "fine_dining",
+      operations_mgmt: "hero_hotel",
+      talent_recruitment: "executive_recruitment",
+      concept_dev: "concept_design"
+    };
+    const normalizedKey = keyAliasMap[currentImageKey] || currentImageKey;
+    if (SERVICE_IMAGE_KEY_OPTIONS.some((o) => o.key === normalizedKey)) {
+      fImageKey.value = normalizedKey;
+    }
+
+    let customImageData = existing && existing.image_url ? String(existing.image_url).trim() : "";
+    const imgStatus = el("div", {
+      className: "record-small",
+      text: customImageData ? "Custom cover photo attached." : "Using built-in luxury cover photo theme selected above."
+    });
+    const fImageUrl = el("input", {
+      type: "url",
+      placeholder: "Or paste HTTPS image URL (https://...)",
+      value: customImageData.startsWith("https://") ? customImageData : ""
+    });
+    fImageUrl.addEventListener("input", () => {
+      const v = fImageUrl.value.trim();
+      if (v) {
+        customImageData = v;
+        imgStatus.textContent = "Using custom HTTPS image URL.";
+      } else if (customImageData.startsWith("https://")) {
+        customImageData = "";
+        imgStatus.textContent = "Using built-in luxury cover photo theme.";
+      }
+    });
+
+    const fFile = el("input", { type: "file", accept: "image/*", style: "display:none;" });
+    const uploadBtn = el("button", {
+      className: "btn btn-outline btn-full",
+      type: "button",
+      text: customImageData ? "Change Cover Photo from Gallery" : "Upload Custom Cover Photo (Optional)",
+      onClick: () => fFile.click()
+    });
+    fFile.addEventListener("change", async () => {
+      const file = fFile.files && fFile.files[0];
+      if (!file) return;
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = "Optimizing photo...";
+      try {
+        customImageData = await compressBannerImageFile(file);
+        fImageUrl.value = "";
+        const kb = Math.round((customImageData.length * 0.75) / 1024);
+        imgStatus.textContent = "Custom photo ready (" + kb + " KB). Tap Save Service below.";
+      } catch (err) {
+        showToast(err.message || "Could not process image.");
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = customImageData ? "Change Cover Photo from Gallery" : "Upload Custom Cover Photo (Optional)";
+      }
+    });
+
+    const clearImgBtn = el("button", {
+      className: "btn btn-ghost btn-sm",
+      type: "button",
+      text: "Use Built-In Photo",
+      onClick: () => {
+        customImageData = "";
+        fImageUrl.value = "";
+        fFile.value = "";
+        uploadBtn.textContent = "Upload Custom Cover Photo (Optional)";
+        imgStatus.textContent = "Reverted to built-in luxury cover photo theme.";
+      }
+    });
+
+    const fPub = el("input", { type: "checkbox", checked: existing ? Boolean(existing.published) : true });
+
+    const saveBtn = el("button", {
+      className: "btn btn-gold",
+      type: "button",
+      text: isEdit ? "Save Service Changes" : "Publish New Service",
+      onClick: async () => {
+        modalErr.classList.add("hidden");
+        const title = fTitle.value.trim();
+        if (!title) {
+          modalErr.textContent = "Please enter a Service Title.";
+          modalErr.classList.remove("hidden");
+          return;
+        }
+        if (!isSafeServiceImageSource(customImageData)) {
+          modalErr.textContent = "Custom Image URL must start with https://";
+          modalErr.classList.remove("hidden");
+          return;
+        }
+
+        const payload = {
+          title,
+          subtitle: fSubtitle.value.trim(),
+          division_name: fDivision.value,
+          service_type: fServiceType.value,
+          typical_timeline: fTimeline.value.trim(),
+          sort_order: Math.max(1, parseInt(fOrder.value, 10) || nextOrder),
+          summary: fSummary.value.trim(),
+          detailed_description: fDetailed.value.trim() || fSummary.value.trim(),
+          services_included: parseLinesToArray(fIncluded.value),
+          owner_benefits: parseLinesToArray(fBenefits.value),
+          deliverables: parseLinesToArray(fDeliverables.value),
+          image_key: fImageKey.value,
+          image_url: customImageData || null,
+          published: fPub.checked
+        };
+
+        if (!isEdit) {
+          const baseSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "service";
+          payload.slug = baseSlug + "-" + String(Date.now()).slice(-4);
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+        try {
+          await mutateTable(
+            isEdit ? "PATCH" : "POST",
+            isEdit ? "/rest/v1/services?id=eq." + encodeURIComponent(existing.id) : "/rest/v1/services",
+            payload,
+            {
+              module: "SERVICE_MANAGEMENT",
+              action: isEdit ? "UPDATE" : "CREATE",
+              targetId: isEdit ? existing.id : payload.slug,
+              summary: (isEdit ? "Updated" : "Created") + " service: " + title
+            }
+          );
+          closeModal();
+          showToast(isEdit ? "Service updated live in the MILA app!" : "New service published live to the MILA app!");
+          await refreshAllData(false);
+        } catch (err) {
+          modalErr.textContent = (err && err.message) || "Could not save service.";
+          modalErr.classList.remove("hidden");
+          saveBtn.disabled = false;
+          saveBtn.textContent = isEdit ? "Save Service Changes" : "Publish New Service";
+        }
+      }
+    });
+
+    openModal(
+      isEdit ? "Edit Service: " + (existing.title || "") : "Add New Service",
+      [
+        modalErr,
+        buildFormField("Service Title *", fTitle),
+        buildFormField("Subtitle / Tagline", fSubtitle),
+        buildFormField("Business Division", fDivision),
+        buildFormField("Enquiry Category Mapping", fServiceType),
+        buildFormField("Typical Timeline", fTimeline),
+        buildFormField("Display Order (#)", fOrder),
+        buildFormField("Short Card Summary", fSummary),
+        buildFormField("Full Overview & Advisory Mandate", fDetailed),
+        buildFormField("Services Included (one item per line)", fIncluded),
+        buildFormField("Benefits for Business Owners (one item per line)", fBenefits),
+        buildFormField("Deliverables (one item per line)", fDeliverables),
+        buildFormField("Built-In Cover Photo Theme", fImageKey),
+        el("div", { className: "field" }, [
+          el("label", { text: "Custom Cover Photo (Optional)" }),
+          fFile,
+          uploadBtn,
+          el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;" }, [
+            imgStatus,
+            clearImgBtn
+          ])
+        ]),
+        buildFormField("Or Paste Custom HTTPS Image URL", fImageUrl),
+        el("label", { className: "checkbox-row" }, [fPub, "Published (Show live in the MILA app)"])
+      ],
+      [
+        el("button", { className: "btn btn-ghost", type: "button", text: "Cancel", onClick: closeModal }),
+        saveBtn
+      ]
+    );
+  }
+
+  // Generic CMS list renderer for Portfolio, Team, Pages
   function renderCmsTable(container, cfg) {
     const writable = canWrite(cfg.moduleId);
     const addBtn = writable
@@ -2642,11 +3377,18 @@
     const isEdit = Boolean(item && item.id);
     const controls = {};
     const bodyNodes = cfg.fields.map((f) => {
-      const val = (item && item[f.key] !== undefined && item[f.key] !== null) ? item[f.key] : (f.defaultValue ?? "");
+      const rawVal = (item && item[f.key] !== undefined && item[f.key] !== null) ? item[f.key] : (f.defaultValue ?? "");
       let input;
-      if (f.type === "textarea") input = el("textarea", { value: String(val) });
-      else if (f.type === "number") input = el("input", { type: "number", value: String(val) });
-      else input = el("input", { value: String(val) });
+      if (f.type === "lines") {
+        input = el("textarea", { rows: "4", placeholder: "Enter one item per line..." });
+        input.value = Array.isArray(rawVal) ? arrayToLines(rawVal) : String(rawVal || "");
+      } else if (f.type === "textarea") {
+        input = el("textarea", { value: String(rawVal) });
+      } else if (f.type === "number") {
+        input = el("input", { type: "number", value: String(rawVal) });
+      } else {
+        input = el("input", { value: String(rawVal) });
+      }
       controls[f.key] = { input, type: f.type };
       return buildFormField(f.label, input);
     });
@@ -2665,7 +3407,13 @@
           onClick: async () => {
             const payload = { published: fPub.checked };
             Object.entries(controls).forEach(([k, meta]) => {
-              payload[k] = meta.type === "number" ? (parseInt(meta.input.value, 10) || 1) : meta.input.value.trim();
+              if (meta.type === "number") {
+                payload[k] = parseInt(meta.input.value, 10) || 1;
+              } else if (meta.type === "lines") {
+                payload[k] = parseLinesToArray(meta.input.value);
+              } else {
+                payload[k] = meta.input.value.trim();
+              }
             });
             if (!isEdit && cfg.onBeforeCreate) cfg.onBeforeCreate(payload);
             try {
@@ -2932,6 +3680,223 @@
 
   function isPromoBannerRow(row) {
     return Boolean(row && String(row.page_key || "").toLowerCase().startsWith("banner_"));
+  }
+
+  function isContactDetailsRow(row) {
+    return Boolean(row && String(row.page_key || "").toLowerCase() === "contact_details");
+  }
+
+  function renderContactInfoManager(container) {
+    const writable = canWrite("contact_info");
+    const existing = (state.data.pages || []).find(isContactDetailsRow) || null;
+    const hasSavedRecord = Boolean(existing && existing.id);
+    const currentEmail = hasSavedRecord ? String(existing.eyebrow || "").trim() : "mdkhanrashid2@gmail.com";
+    const currentPhone = hasSavedRecord ? String(existing.headline || "").trim() : "+916363262421";
+    const currentWindow = (existing && existing.subheadline) ? existing.subheadline : "Partner Response Window: Within 1 Business Day (IST)";
+    const currentNote = (existing && existing.body_copy) ? existing.body_copy : "Reach our partner desk directly by phone or email for consultancy mandates, pre-opening advisory, or talent partnerships.";
+
+    container.appendChild(
+      renderModuleHeader(
+        "Contact Email & Phone",
+        "Manage the official email ID and phone number shown whenever users tap 'Contact Us' in the MILA app. Edit or delete either field anytime — changes go live immediately."
+      )
+    );
+
+    async function saveContactPayload(nextEmail, nextPhone, nextWindow, nextNote, summaryMsg, toastMsg) {
+      const payload = {
+        page_key: "contact_details",
+        page_title: "Contact Details",
+        eyebrow: nextEmail,
+        headline: nextPhone,
+        subheadline: nextWindow || "Partner Response Window: Within 1 Business Day (IST)",
+        body_copy: nextNote || "",
+        hero_image_key: "contact_desk",
+        cta_label: "Contact Us",
+        published: true
+      };
+      if (existing && existing.id) {
+        await mutateTable(
+          "PATCH",
+          "/rest/v1/website_content?id=eq." + encodeURIComponent(existing.id),
+          payload,
+          { module: "WEBSITE_CONTENT_MANAGEMENT", action: "UPDATE", targetId: existing.id, summary: summaryMsg }
+        );
+      } else {
+        await mutateTable(
+          "POST",
+          "/rest/v1/website_content",
+          payload,
+          { module: "WEBSITE_CONTENT_MANAGEMENT", action: "CREATE", targetId: "contact_details", summary: summaryMsg }
+        );
+      }
+      showToast(toastMsg);
+      await refreshAllData(false);
+    }
+
+    // Live summary card showing current phone & email with quick Delete buttons
+    const liveSummaryRows = [];
+    liveSummaryRows.push(
+      el("div", { className: "record-top" }, [
+        pill(currentEmail || currentPhone ? "Live on Contact Us Screen" : "Hidden / Cleared", currentEmail || currentPhone ? "emerald" : "muted"),
+        el("span", { className: "record-small", text: existing && existing.updated_at ? "Updated " + formatTimestamp(existing.updated_at) : "Default MILA Contact Active" })
+      ])
+    );
+
+    liveSummaryRows.push(
+      el("div", { style: "display:grid;gap:10px;margin:10px 0 14px;" }, [
+        el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border-radius:10px;border:1px solid rgba(212,175,122,0.22);background:rgba(15,18,16,0.55);" }, [
+          el("div", null, [
+            el("div", { className: "record-small", text: "CURRENT EMAIL ID" }),
+            el("div", { className: "record-title", style: "margin-top:2px;font-size:15px;", text: currentEmail || "Deleted / Not shown in app" })
+          ]),
+          writable && currentEmail
+            ? el("button", {
+                className: "btn btn-danger btn-sm",
+                type: "button",
+                text: "Delete Email",
+                onClick: () =>
+                  confirmDelete(
+                    "Delete Contact Email?",
+                    "Remove '" + currentEmail + "' from the MILA app Contact Us screen?",
+                    async () => {
+                      await saveContactPayload(
+                        "",
+                        currentPhone,
+                        currentWindow,
+                        currentNote,
+                        "Deleted official contact email (" + currentEmail + ")",
+                        "Contact email deleted from MILA app."
+                      );
+                    }
+                  )
+              })
+            : null
+        ]),
+        el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border-radius:10px;border:1px solid rgba(212,175,122,0.22);background:rgba(15,18,16,0.55);" }, [
+          el("div", null, [
+            el("div", { className: "record-small", text: "CURRENT PHONE NUMBER" }),
+            el("div", { className: "record-title", style: "margin-top:2px;font-size:15px;", text: currentPhone || "Deleted / Not shown in app" })
+          ]),
+          writable && currentPhone
+            ? el("button", {
+                className: "btn btn-danger btn-sm",
+                type: "button",
+                text: "Delete Number",
+                onClick: () =>
+                  confirmDelete(
+                    "Delete Contact Phone Number?",
+                    "Remove '" + currentPhone + "' from the MILA app Contact Us screen?",
+                    async () => {
+                      await saveContactPayload(
+                        currentEmail,
+                        "",
+                        currentWindow,
+                        currentNote,
+                        "Deleted official contact phone (" + currentPhone + ")",
+                        "Contact phone number deleted from MILA app."
+                      );
+                    }
+                  )
+              })
+            : null
+        ])
+      ])
+    );
+
+    const fEmail = el("input", {
+      type: "email",
+      value: currentEmail,
+      placeholder: "mdkhanrashid2@gmail.com (leave blank to hide email)",
+      disabled: !writable
+    });
+    const fPhone = el("input", {
+      type: "tel",
+      value: currentPhone,
+      placeholder: "+916363262421 (leave blank to hide phone)",
+      disabled: !writable
+    });
+    const fWindow = el("input", {
+      value: currentWindow,
+      placeholder: "Partner Response Window: Within 1 Business Day (IST)",
+      disabled: !writable
+    });
+    const fNote = el("textarea", {
+      value: currentNote,
+      placeholder: "Short note shown on Contact Us screen...",
+      disabled: !writable
+    });
+
+    const actionButtons = [];
+    if (writable) {
+      actionButtons.push(
+        el("button", {
+          className: "btn btn-gold",
+          type: "button",
+          text: "Save Contact Details",
+          onClick: async () => {
+            const emailVal = fEmail.value.trim();
+            const phoneVal = fPhone.value.trim();
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (emailVal && !emailRegex.test(emailVal)) {
+              showToast("Please enter a valid email address (or leave it blank to hide).");
+              return;
+            }
+            if (phoneVal && phoneVal.replace(/[^\d+]/g, "").length < 7) {
+              showToast("Please enter a valid phone number (or leave it blank to hide).");
+              return;
+            }
+            try {
+              await saveContactPayload(
+                emailVal,
+                phoneVal,
+                fWindow.value.trim() || "Partner Response Window: Within 1 Business Day (IST)",
+                fNote.value.trim(),
+                "Updated official contact email (" + (emailVal || "none") + ") and phone (" + (phoneVal || "none") + ")",
+                "Contact email & phone updated live in the MILA app!"
+              );
+            } catch (err) {
+              showToast(err.message || "Could not save contact details.");
+            }
+          }
+        })
+      );
+
+      if (currentEmail || currentPhone) {
+        actionButtons.push(
+          el("button", {
+            className: "btn btn-danger btn-sm",
+            type: "button",
+            text: "Delete Both Email & Number",
+            onClick: () =>
+              confirmDelete(
+                "Delete Both Email & Phone?",
+                "Remove both the email ID and phone number from the MILA app Contact Us screen? You can add new ones anytime.",
+                async () => {
+                  await saveContactPayload(
+                    "",
+                    "",
+                    fWindow.value.trim() || currentWindow,
+                    fNote.value.trim(),
+                    "Deleted both official contact email and phone number",
+                    "Contact email and phone number deleted from MILA app."
+                  );
+                }
+              )
+          })
+        );
+      }
+    }
+
+    const card = el("div", { className: "record-card" }, [
+      ...liveSummaryRows,
+      buildFormField("Edit Official Contact Email", fEmail),
+      buildFormField("Edit Official Phone Number", fPhone),
+      buildFormField("Partner Response Window", fWindow),
+      buildFormField("Contact Desk Note", fNote),
+      actionButtons.length ? el("div", { className: "record-actions" }, actionButtons) : null
+    ]);
+
+    container.appendChild(card);
   }
 
   function getPromoBanners() {
@@ -3476,36 +4441,7 @@
       case "notifications": renderNotifications(container); break;
       case "banners": renderPromoBanners(container); break;
       case "services":
-        renderCmsTable(container, {
-          moduleId: "services",
-          table: "services",
-          auditModule: "SERVICE_MANAGEMENT",
-          title: "Services Management",
-          subtitle: "Manage MILA Consultancy service offerings",
-          singular: "Service",
-          addLabel: "Add Service",
-          items: state.data.services,
-          getTitle: (s) => s.title || "",
-          getBadge: (s) => s.division_name || "",
-          getBody: (s) => s.summary || "",
-          fields: [
-            { key: "title", label: "Title *" },
-            { key: "subtitle", label: "Subtitle" },
-            { key: "division_name", label: "Division", defaultValue: "MILA Consultancy" },
-            { key: "typical_timeline", label: "Timeline", defaultValue: "6–12 Weeks" },
-            { key: "summary", label: "Summary", type: "textarea" },
-            { key: "detailed_description", label: "Detailed Description", type: "textarea" },
-            { key: "sort_order", label: "Sort Order", type: "number", defaultValue: 1 }
-          ],
-          onBeforeCreate: (p) => {
-            p.service_type = "HOSPITALITY_PRE_OPENING";
-            p.slug = (p.title || "service").toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + (Date.now() % 1000);
-            p.image_key = "palace_resort";
-            p.services_included = [];
-            p.owner_benefits = [];
-            p.deliverables = [];
-          }
-        });
+        renderServicesManager(container);
         break;
       case "portfolio":
         renderCmsTable(container, {
@@ -3527,12 +4463,13 @@
             { key: "filter_group", label: "Filter Group", defaultValue: "Pre-Opening" },
             { key: "scale", label: "Scale", defaultValue: "100+ Keys" },
             { key: "summary", label: "Summary", type: "textarea" },
+            { key: "outcomes", label: "Key Outcomes (one per line)", type: "lines" },
             { key: "sort_order", label: "Sort Order", type: "number", defaultValue: 1 }
           ],
           onBeforeCreate: (p) => {
             p.slug = (p.property_name || "project").toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + (Date.now() % 1000);
             p.image_key = "palace_resort";
-            p.outcomes = [];
+            if (!Array.isArray(p.outcomes)) p.outcomes = [];
           }
         });
         break;
@@ -3564,6 +4501,9 @@
           onBeforeCreate: (p) => { p.image_key = "hero_hotel"; }
         });
         break;
+      case "contact_info":
+        renderContactInfoManager(container);
+        break;
       case "pages":
         renderCmsTable(container, {
           moduleId: "pages",
@@ -3573,7 +4513,7 @@
           subtitle: "Edit headlines, copy, and call-to-action labels",
           singular: "Page Content",
           addLabel: "Add Page",
-          items: (state.data.pages || []).filter((p) => !isPromoBannerRow(p)),
+          items: (state.data.pages || []).filter((p) => !isPromoBannerRow(p) && !isContactDetailsRow(p)),
           getTitle: (p) => (p.page_title || "") + " (" + (p.page_key || "") + ")",
           getBadge: (p) => p.eyebrow || "",
           getBody: (p) => p.headline || p.body_copy || "",
@@ -3683,5 +4623,34 @@
         sidebarBackdrop.classList.add("hidden");
       });
     }
+
+    // Keep session alive & fresh whenever admin returns from another app or browser tab
+    let lastResumeCheckAt = 0;
+    async function handleAppResume() {
+      const now = Date.now();
+      if (now - lastResumeCheckAt < 3000) return;
+      lastResumeCheckAt = now;
+      if (state.admin && state.token) {
+        if (state.tokenExpiresAt > 0 && now >= state.tokenExpiresAt - 900_000) {
+          await refreshAdminSession({ requireVerify: false });
+        }
+        const modalOpen = !document.getElementById("modalBackdrop").classList.contains("hidden");
+        if (!modalOpen) {
+          refreshAllData(false, true);
+        }
+      } else {
+        await restoreSavedAdminSession();
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) handleAppResume();
+    });
+    window.addEventListener("focus", () => {
+      handleAppResume();
+    });
+
+    // Automatically restore saved admin session on launch so admin stays logged in until Sign Out
+    restoreSavedAdminSession();
   });
 })();

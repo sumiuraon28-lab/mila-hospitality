@@ -92,17 +92,27 @@ fun ServiceDetailScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         item {
+            val customBitmap = rememberRemoteOrDataBitmap(service.imageUrl)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(270.dp)
             ) {
-                Image(
-                    painter = painterResource(id = service.imageRes),
-                    contentDescription = service.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (customBitmap != null) {
+                    Image(
+                        bitmap = customBitmap,
+                        contentDescription = service.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = service.imageRes),
+                        contentDescription = service.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -180,112 +190,124 @@ fun ServiceDetailScreen(
                         text = service.title,
                         style = MaterialTheme.typography.headlineLarge.copy(color = MilaIvory)
                     )
-                    Text(
-                        text = service.subtitle,
-                        style = MaterialTheme.typography.titleSmall.copy(color = MilaChampagneGold)
-                    )
-                }
-            }
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "CONSULTANCY SERVICE DIRECTORY (01 – 08)",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = MilaChampagneGold,
-                        letterSpacing = 1.5.sp
-                    ),
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(allServices, key = { it.id }) { item ->
-                        val selected = item.slug == service.slug
-                        FilterChip(
-                            selected = selected,
-                            onClick = { if (!selected) onSelectServicePage(item) },
-                            label = { Text("${item.numberBadge}. ${item.title}") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MilaChampagneGold,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                containerColor = MilaCharcoalSurface,
-                                labelColor = MilaIvoryMuted
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = selected,
-                                borderColor = MilaCharcoalBorder,
-                                selectedBorderColor = MilaChampagneGold
-                            ),
-                            modifier = Modifier.testTag("service_switcher_${item.slug}")
+                    if (service.subtitle.isNotBlank()) {
+                        Text(
+                            text = service.subtitle,
+                            style = MaterialTheme.typography.titleSmall.copy(color = MilaChampagneGold)
                         )
                     }
                 }
             }
         }
 
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
-                border = BorderStroke(1.dp, MilaGoldSubtle),
-                shape = MaterialTheme.shapes.large
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+        if (allServices.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "OVERVIEW & ADVISORY MANDATE",
-                        style = MaterialTheme.typography.labelMedium.copy(
+                        text = "CONSULTANCY SERVICE DIRECTORY (${allServices.size})",
+                        style = MaterialTheme.typography.labelSmall.copy(
                             color = MilaChampagneGold,
                             letterSpacing = 1.5.sp
-                        )
+                        ),
+                        modifier = Modifier.padding(horizontal = 20.dp)
                     )
-                    Text(
-                        text = service.detailedDescription,
-                        style = MaterialTheme.typography.bodyLarge.copy(color = MilaIvoryMuted)
-                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(allServices, key = { it.id }) { item ->
+                            val selected = item.slug == service.slug
+                            FilterChip(
+                                selected = selected,
+                                onClick = { if (!selected) onSelectServicePage(item) },
+                                label = { Text("${item.numberBadge}. ${item.title}") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MilaChampagneGold,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                    containerColor = MilaCharcoalSurface,
+                                    labelColor = MilaIvoryMuted
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = selected,
+                                    borderColor = MilaCharcoalBorder,
+                                    selectedBorderColor = MilaChampagneGold
+                                ),
+                                modifier = Modifier.testTag("service_switcher_${item.slug}")
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        item {
-            EditorialServiceListCard(
-                eyebrow = "Scope of Engagement",
-                title = "Services Included",
-                icon = Icons.Rounded.Layers,
-                items = service.servicesIncluded,
-                elevated = false,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+        if (service.detailedDescription.isNotBlank()) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
+                    border = BorderStroke(1.dp, MilaGoldSubtle),
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "OVERVIEW & ADVISORY MANDATE",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = MilaChampagneGold,
+                                letterSpacing = 1.5.sp
+                            )
+                        )
+                        Text(
+                            text = service.detailedDescription,
+                            style = MaterialTheme.typography.bodyLarge.copy(color = MilaIvoryMuted)
+                        )
+                    }
+                }
+            }
         }
 
-        item {
-            EditorialServiceListCard(
-                eyebrow = "Commercial & Strategic Value",
-                title = "Benefits for Business Owners",
-                icon = Icons.AutoMirrored.Rounded.TrendingUp,
-                items = service.ownerBenefits,
-                elevated = true,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+        if (service.servicesIncluded.isNotEmpty()) {
+            item {
+                EditorialServiceListCard(
+                    eyebrow = "Scope of Engagement",
+                    title = "Services Included",
+                    icon = Icons.Rounded.Layers,
+                    items = service.servicesIncluded,
+                    elevated = false,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+            }
         }
 
-        item {
-            EditorialServiceListCard(
-                eyebrow = "Tangible Outputs",
-                title = "Deliverables",
-                icon = Icons.Rounded.AssignmentTurnedIn,
-                items = service.deliverables,
-                elevated = false,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+        if (service.ownerBenefits.isNotEmpty()) {
+            item {
+                EditorialServiceListCard(
+                    eyebrow = "Commercial & Strategic Value",
+                    title = "Benefits for Business Owners",
+                    icon = Icons.AutoMirrored.Rounded.TrendingUp,
+                    items = service.ownerBenefits,
+                    elevated = true,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+            }
+        }
+
+        if (service.deliverables.isNotEmpty()) {
+            item {
+                EditorialServiceListCard(
+                    eyebrow = "Tangible Outputs",
+                    title = "Deliverables",
+                    icon = Icons.Rounded.AssignmentTurnedIn,
+                    items = service.deliverables,
+                    elevated = false,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+            }
         }
 
         item {
