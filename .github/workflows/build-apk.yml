@@ -90,14 +90,16 @@ jobs:
           retention-days: 30
 
       - name: Publish direct APK download on GitHub Releases
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          RELEASE_TITLE="Mila Hospitality Android APK (Build #${GITHUB_RUN_NUMBER})"
+          RELEASE_NOTES="Updated APK from build #${GITHUB_RUN_NUMBER} (commit ${GITHUB_SHA::7}). Tap Mila-Hospitality.apk below on your Android phone to download and install."
           if gh release view latest-apk >/dev/null 2>&1; then
             gh release upload latest-apk Mila-Hospitality.apk --clobber
+            gh release edit latest-apk --title "$RELEASE_TITLE" --notes "$RELEASE_NOTES"
           else
             gh release create latest-apk Mila-Hospitality.apk \
-              --title "Mila Hospitality Android APK" \
-              --notes "Tap Mila-Hospitality.apk below on your Android phone to download and install directly."
+              --title "$RELEASE_TITLE" \
+              --notes "$RELEASE_NOTES"
           fi
