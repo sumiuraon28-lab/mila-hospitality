@@ -1,9 +1,9 @@
-const CACHE_NAME = "mila-ios-pwa-v2";
+const CACHE_NAME = "mila-ios-pwa-v3";
 const SHELL_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=20261127b",
-  "./app.js?v=20261127b",
+  "./styles.css?v=20261127c",
+  "./app.js?v=20261127c",
   "./manifest.json",
   "./apple-touch-icon.png",
   "./icon-192.png",

@@ -355,7 +355,7 @@
       id: state.user.id,
       email: state.user.email,
       full_name: displayName,
-      role: "CLIENT",
+      account_type: "CLIENT",
       updated_at: new Date().toISOString()
     };
     try {
@@ -514,6 +514,7 @@
     const fPhone = el("input", { type: "tel", placeholder: "Mobile / WhatsApp number *" });
     const fProperty = el("input", { placeholder: "Hotel / Restaurant / Project Name *" });
     const fCity = el("input", { placeholder: "City / State (e.g. Mumbai, Goa) *" });
+    const fScale = el("input", { placeholder: "Keys / Covers / Project Scale (e.g. 60 Keys, 80 Covers)" });
     const fNotes = el("textarea", { placeholder: "Share your project timeline, keys/covers, and advisory goals..." });
 
     const submitBtn = el("button", {
@@ -524,13 +525,15 @@
         const contactName = fName.value.trim();
         const phone = fPhone.value.trim();
         const prop = fProperty.value.trim();
-        if (!contactName || !phone || !prop) {
-          showToast("Please fill in your name, phone number, and project name.");
+        const city = fCity.value.trim() || "India";
+        if (contactName.length < 2 || phone.length < 7 || prop.length < 2) {
+          showToast("Please enter your full name, valid phone number, and project name.");
           return;
         }
         submitBtn.disabled = true;
         submitBtn.textContent = "Submitting...";
         try {
+          await syncLoggedInUserProfile();
           const refCode = "MILA-" + String(Date.now()).slice(-6);
           await supaFetch("/rest/v1/service_enquiries", {
             method: "POST",
@@ -540,11 +543,12 @@
               reference_code: refCode,
               service_type: serviceType || "HOSPITALITY_PRE_OPENING",
               property_name: prop,
-              location: fCity.value.trim() || "India",
+              city: city.length >= 2 ? city : "India",
+              scale_summary: fScale.value.trim() || (serviceTitle || "Hospitality Consultancy Mandate"),
               contact_name: contactName,
               contact_email: state.user.email,
               contact_phone: phone,
-              project_notes: fNotes.value.trim() || (serviceTitle ? "Enquiry regarding " + serviceTitle : "Consultancy enquiry from MILA iPhone app"),
+              brief_notes: fNotes.value.trim() || (serviceTitle ? "Enquiry regarding " + serviceTitle : "Consultancy enquiry from MILA iPhone app"),
               status: "SUBMITTED"
             })
           });
@@ -564,7 +568,8 @@
         el("div", { className: "field" }, [el("label", { text: "Full Name *" }), fName]),
         el("div", { className: "field" }, [el("label", { text: "Phone / WhatsApp *" }), fPhone]),
         el("div", { className: "field" }, [el("label", { text: "Property / Business Name *" }), fProperty]),
-        el("div", { className: "field" }, [el("label", { text: "City / Location" }), fCity]),
+        el("div", { className: "field" }, [el("label", { text: "City / Location *" }), fCity]),
+        el("div", { className: "field" }, [el("label", { text: "Project Scale (Optional)" }), fScale]),
         el("div", { className: "field" }, [el("label", { text: "Project Requirements" }), fNotes])
       ],
       [el("button", { className: "btn btn-outline", type: "button", text: "Cancel", onClick: closeSheet }), submitBtn]
@@ -622,12 +627,15 @@
             body: JSON.stringify({
               reviewer_user_id: state.user.id,
               reviewer_email: state.user.email,
-              attribution_role: name,
-              engagement_context: fCtx.value.trim() || "MILA Hospitality Client",
+              attribution_role: name.slice(0, 120),
+              engagement_context: (fCtx.value.trim() || "MILA Hospitality Client").slice(0, 160),
               rating: selectedRating,
-              quote: quote,
+              quote: quote.slice(0, 1200),
               source: "APP_USER",
-              published: false
+              published: false,
+              admin_reply: "",
+              admin_replied_by: "",
+              admin_replied_at: null
             })
           });
           closeSheet();
@@ -662,6 +670,7 @@
     const fName = el("input", { value: state.user.fullName || "", placeholder: "Full Name *" });
     const fPhone = el("input", { type: "tel", placeholder: "Mobile Number *" });
     const fCity = el("input", { placeholder: "Current City *" });
+    const fCurrentProp = el("input", { placeholder: "Current / Last Hotel or Company *" });
     const fExp = el("input", { type: "number", value: "5", placeholder: "Years of hospitality experience" });
     const fNote = el("textarea", { placeholder: "Brief cover note highlighting your hospitality background..." });
 
@@ -670,25 +679,27 @@
       type: "button",
       text: "Submit Application",
       onClick: async () => {
-        if (!fName.value.trim() || !fPhone.value.trim()) {
-          showToast("Please enter your full name and phone number.");
+        if (fName.value.trim().length < 2 || fPhone.value.trim().length < 7) {
+          showToast("Please enter your full name and valid phone number.");
           return;
         }
         submitBtn.disabled = true;
         submitBtn.textContent = "Submitting...";
         try {
+          await syncLoggedInUserProfile();
           await supaFetch("/rest/v1/job_applications", {
             method: "POST",
             headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
             body: JSON.stringify({
               user_id: state.user.id,
-              role_id: job.slug || job.id,
-              role_title: job.title,
+              role_id: String(job.slug || job.id || "hospitality-role"),
+              role_title: job.title || "Hospitality Role",
+              location: fCity.value.trim() || job.location || "India",
               candidate_name: fName.value.trim(),
               candidate_email: state.user.email,
               candidate_phone: fPhone.value.trim(),
-              current_location: fCity.value.trim() || "India",
-              years_experience: Math.max(0, parseInt(fExp.value, 10) || 0),
+              years_experience: Math.max(0, Math.min(60, parseInt(fExp.value, 10) || 0)),
+              current_property: fCurrentProp.value.trim() || "Hospitality Professional",
               cover_note: fNote.value.trim(),
               status: "APPLIED"
             })
@@ -708,7 +719,8 @@
       [
         el("div", { className: "field" }, [el("label", { text: "Full Name *" }), fName]),
         el("div", { className: "field" }, [el("label", { text: "Phone Number *" }), fPhone]),
-        el("div", { className: "field" }, [el("label", { text: "Current City" }), fCity]),
+        el("div", { className: "field" }, [el("label", { text: "Current City *" }), fCity]),
+        el("div", { className: "field" }, [el("label", { text: "Current / Last Hotel or Company *" }), fCurrentProp]),
         el("div", { className: "field" }, [el("label", { text: "Years of Experience" }), fExp]),
         el("div", { className: "field" }, [el("label", { text: "Cover Note" }), fNote])
       ],
