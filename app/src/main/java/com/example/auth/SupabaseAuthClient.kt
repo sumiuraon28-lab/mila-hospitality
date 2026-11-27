@@ -1,5 +1,7 @@
 package com.example.auth
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.example.BuildConfig
 import com.example.data.AdminUser
 import com.example.data.BusinessCategory
@@ -14,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -56,6 +60,12 @@ data class VerifiedPhoneOtpSession(
     val accessToken: String,
     val refreshToken: String,
     val userId: String
+)
+
+data class PendingEmailOtpDraft(
+    val email: String,
+    val fullName: String,
+    val mobileNumber: String
 )
 
 sealed interface ClientAuthOutcome {
@@ -144,6 +154,8 @@ object SupabaseAuthValidator {
         return if (digits.length in 10..15 && digits.all { it.isDigit() }) normalized else null
     }
 
+    fun isValidEmail(email: String): Boolean = emailRegex.matches(email.trim())
+
     fun validateQuickMilaRegistration(
         fullName: String,
         email: String,
@@ -159,6 +171,7 @@ object SupabaseAuthValidator {
 }
 
 class SupabaseAuthClient(
+    private val context: Context? = null,
     private val supabaseUrl: String = BuildConfig.SUPABASE_URL,
     private val supabaseAnonKey: String = BuildConfig.SUPABASE_ANON_KEY,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -172,6 +185,12 @@ class SupabaseAuthClient(
         httpClient = httpClient
     )
 
+    private val sessionPrefs: SharedPreferences? =
+        context?.applicationContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val refreshMutex = Mutex()
+    @Volatile
+    private var lastRefreshSuccessAtMs: Long = 0L
+
     private val _session = MutableStateFlow<SupabaseSession?>(null)
     val session: StateFlow<SupabaseSession?> = _session.asStateFlow()
 
@@ -181,10 +200,360 @@ class SupabaseAuthClient(
     private val _myEnquiries = MutableStateFlow<List<ConsultationInquiry>>(emptyList())
     val myEnquiries: StateFlow<List<ConsultationInquiry>> = _myEnquiries.asStateFlow()
 
+    init {
+        hydrateSessionFromStorage()
+    }
+
     fun isConfigured(): Boolean = SupabaseConfig.isConfigured(supabaseUrl, supabaseAnonKey)
+
+    fun hasSavedSession(): Boolean =
+        _session.value != null || sessionPrefs?.getBoolean(KEY_IS_LOGGED_IN, false) == true
+
+    fun loadPendingEmailOtpDraft(): PendingEmailOtpDraft? {
+        val prefs = sessionPrefs ?: return null
+        val email = prefs.getString(KEY_PENDING_OTP_EMAIL, null).orEmpty().trim()
+        val sentAt = prefs.getLong(KEY_PENDING_OTP_SENT_AT, 0L)
+        if (email.isBlank() || System.currentTimeMillis() - sentAt > PENDING_OTP_TTL_MS) {
+            return null
+        }
+        return PendingEmailOtpDraft(
+            email = email,
+            fullName = prefs.getString(KEY_PENDING_OTP_NAME, null).orEmpty(),
+            mobileNumber = prefs.getString(KEY_PENDING_OTP_MOBILE, null).orEmpty()
+        )
+    }
+
+    fun clearPendingEmailOtpDraft() {
+        sessionPrefs?.edit()
+            ?.remove(KEY_PENDING_OTP_EMAIL)
+            ?.remove(KEY_PENDING_OTP_NAME)
+            ?.remove(KEY_PENDING_OTP_MOBILE)
+            ?.remove(KEY_PENDING_OTP_SENT_AT)
+            ?.commit()
+    }
+
+    private fun savePendingEmailOtpDraft(email: String, fullName: String, mobileNumber: String) {
+        sessionPrefs?.edit()
+            ?.putString(KEY_PENDING_OTP_EMAIL, email.trim())
+            ?.putString(KEY_PENDING_OTP_NAME, fullName.trim())
+            ?.putString(KEY_PENDING_OTP_MOBILE, mobileNumber.trim())
+            ?.putLong(KEY_PENDING_OTP_SENT_AT, System.currentTimeMillis())
+            ?.commit()
+    }
 
     fun clearPendingDraftProfile() {
         _pendingDraftProfile.value = null
+    }
+
+    /**
+     * Free (₹0) Email OTP step 1: sends a 6-digit verification code to the user's email inbox
+     * via Supabase Auth (`POST /auth/v1/otp`) while storing their Name and Mobile Number in metadata.
+     */
+    suspend fun sendEmailOtp(
+        email: String,
+        fullName: String,
+        rawPhone: String
+    ): Result<String> {
+        val cleanName = fullName.trim()
+        if (cleanName.length < 2) {
+            return Result.failure(IllegalArgumentException("Please enter your full name."))
+        }
+        val normalizedPhone = SupabaseAuthValidator.normalizePhoneE164(rawPhone)
+            ?: return Result.failure(IllegalArgumentException("Please enter a valid 10-digit mobile number."))
+        val normalizedEmail = email.trim().lowercase()
+        if (!SupabaseAuthValidator.isValidEmail(normalizedEmail)) {
+            return Result.failure(IllegalArgumentException("Please enter a valid email address."))
+        }
+        if (!isConfigured()) {
+            return Result.failure(
+                IllegalStateException("Email OTP service is not configured yet. Please check your connection.")
+            )
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("email", normalizedEmail)
+                    put("create_user", true)
+                    put(
+                        "data",
+                        JSONObject().apply {
+                            put("full_name", cleanName)
+                            put("mobile_number", normalizedPhone)
+                        }
+                    )
+                }
+                val httpRequest = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/otp")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = parseJsonOrNull(bodyText)
+                    if (!response.isSuccessful) {
+                        val rawMsg = extractErrorMessage(json, "Could not send Email OTP (HTTP ${response.code}).")
+                        val friendlyMsg = when {
+                            response.code == 429 || rawMsg.contains("rate limit", ignoreCase = true) ->
+                                "Too many OTP requests right now. Please wait a minute and try again, or use Continue with Google below."
+                            rawMsg.contains("signups not allowed", ignoreCase = true) ->
+                                "Email signups are currently disabled in Supabase settings. Please enable Email provider in Supabase."
+                            else -> rawMsg
+                        }
+                        Result.failure(IllegalStateException(friendlyMsg))
+                    } else {
+                        savePendingEmailOtpDraft(
+                            email = normalizedEmail,
+                            fullName = cleanName,
+                            mobileNumber = normalizedPhone
+                        )
+                        Result.success(normalizedEmail)
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure(
+                    IllegalStateException(e.localizedMessage ?: "Network error while sending Email OTP.")
+                )
+            }
+        }
+    }
+
+    /**
+     * Free (₹0) Email OTP step 2: verifies the 6-digit code sent to the user's email inbox,
+     * persists the refresh token locally so returning users stay logged in, and syncs their
+     * Name, Mobile Number, and Email to Supabase for the Admin Panel.
+     */
+    suspend fun verifyEmailOtp(
+        email: String,
+        otpCode: String,
+        fullName: String,
+        rawPhone: String
+    ): Result<SupabaseSession> {
+        val normalizedEmail = email.trim().lowercase()
+        if (!SupabaseAuthValidator.isValidEmail(normalizedEmail)) {
+            return Result.failure(IllegalArgumentException("Invalid email address."))
+        }
+        val cleanOtp = otpCode.trim()
+        if (cleanOtp.length !in 6..8 || !cleanOtp.all { it.isDigit() }) {
+            return Result.failure(IllegalArgumentException("Please enter the 6-digit OTP sent to your email."))
+        }
+        val normalizedPhone = SupabaseAuthValidator.normalizePhoneE164(rawPhone) ?: rawPhone.trim()
+        val cleanName = fullName.trim()
+        if (!isConfigured()) {
+            return Result.failure(
+                IllegalStateException("Email OTP verification is not configured yet.")
+            )
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                // Supabase GoTrue accepts type="email" for both new signups and returning users;
+                // fall back to "signup" / "magiclink" only if an older instance rejects "email".
+                val verifyTypes = listOf("email", "signup", "magiclink")
+                var verifiedJson: JSONObject? = null
+                var lastErrorMsg: String? = null
+
+                for (verifyType in verifyTypes) {
+                    val payload = JSONObject().apply {
+                        put("email", normalizedEmail)
+                        put("token", cleanOtp)
+                        put("type", verifyType)
+                    }
+                    val req = Request.Builder()
+                        .url("${normalizedBaseUrl()}/auth/v1/verify")
+                        .addHeader("apikey", supabaseAnonKey.trim())
+                        .addHeader("Content-Type", "application/json")
+                        .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                        .build()
+
+                    httpClient.newCall(req).execute().use { response ->
+                        val bodyText = response.body?.string().orEmpty()
+                        val json = parseJsonOrNull(bodyText)
+                        if (response.isSuccessful && json != null && !json.optString("access_token").isNullOrBlank()) {
+                            verifiedJson = json
+                        } else {
+                            lastErrorMsg = extractErrorMessage(json, "Invalid or expired OTP code. Please try again.")
+                        }
+                    }
+                    if (verifiedJson != null) break
+                }
+
+                val activeJson = verifiedJson ?: return@withContext Result.failure(
+                    IllegalStateException(lastErrorMsg ?: "Invalid or expired OTP code. Please check your email and try again.")
+                )
+
+                val accessToken = activeJson.optString("access_token").orEmpty()
+                val refreshToken = activeJson.optString("refresh_token").orEmpty()
+                val userObj = activeJson.optJSONObject("user")
+                val userId = userObj?.optString("id").orEmpty()
+                val resolvedEmail = userObj?.optString("email")?.takeIf { it.isNotBlank() } ?: normalizedEmail
+                if (accessToken.isBlank() || userId.isBlank()) {
+                    return@withContext Result.failure(
+                        IllegalStateException("OTP verification did not return a valid session.")
+                    )
+                }
+
+                val remoteProfile = dbClient.fetchClientProfile(accessToken, userId).getOrNull()
+                val resolvedName = cleanName.takeIf { it.length >= 2 }
+                    ?: remoteProfile?.fullName?.trim()?.takeIf { it.length >= 2 }
+                    ?: resolvedEmail.substringBefore("@").takeIf { it.length >= 2 }
+                    ?: "MILA Member"
+                val resolvedMobile = normalizedPhone.takeIf { it.length >= 7 }
+                    ?: remoteProfile?.mobileNumber?.trim()?.takeIf { it.length >= 7 && it != "Not Provided" }
+                    ?: "Not Provided"
+
+                val metadata = SupabaseClientMetadata(
+                    fullName = resolvedName,
+                    email = resolvedEmail,
+                    mobileNumber = resolvedMobile,
+                    companyName = remoteProfile?.companyName?.ifBlank { "MILA Hospitality Member" }
+                        ?: "MILA Hospitality Member",
+                    designation = remoteProfile?.designation?.ifBlank { "Client" } ?: "Client",
+                    city = remoteProfile?.city?.ifBlank { "India" } ?: "India",
+                    businessCategory = remoteProfile?.resolvedBusinessCategory
+                        ?: BusinessCategory.LUXURY_HOTEL_RESORT
+                )
+                val session = SupabaseSession(
+                    accessToken = accessToken,
+                    refreshToken = refreshToken,
+                    userId = userId,
+                    email = resolvedEmail,
+                    metadata = metadata
+                )
+
+                syncClientTables(session, metadata, userProfileEmailOverride = resolvedEmail)
+                clearPendingEmailOtpDraft()
+                persistSession(session)
+                lastRefreshSuccessAtMs = System.currentTimeMillis()
+                _session.value = session
+                _pendingDraftProfile.value = metadata
+                refreshClientEnquiries()
+                Result.success(session)
+            } catch (e: Exception) {
+                Result.failure(
+                    IllegalStateException(e.localizedMessage ?: "Network error while verifying Email OTP.")
+                )
+            }
+        }
+    }
+
+    /**
+     * Silently refreshes the saved Supabase session in the background (e.g., on launch or when
+     * returning from another app) so JWT tokens stay fresh and Admin Panel sees updated activity.
+     *
+     * CRITICAL: Never logs the user out on network errors, timeouts, or token refresh failures.
+     * The user stays signed in until they explicitly tap Sign Out.
+     */
+    suspend fun restoreSavedSession(force: Boolean = false): Boolean = refreshMutex.withLock {
+        if (_session.value == null) {
+            hydrateSessionFromStorage()
+        }
+        val prefs = sessionPrefs ?: return@withLock _session.value != null
+        val currentInMemory = _session.value
+        val savedRefreshToken = currentInMemory?.refreshToken?.takeIf { it.isNotBlank() }
+            ?: prefs.getString(KEY_REFRESH_TOKEN, null).orEmpty()
+        if (savedRefreshToken.isBlank() || !isConfigured()) {
+            return@withLock currentInMemory != null
+        }
+
+        val now = System.currentTimeMillis()
+        if (!force && currentInMemory != null && now - lastRefreshSuccessAtMs < REFRESH_MIN_INTERVAL_MS) {
+            return@withLock true
+        }
+
+        val savedName = currentInMemory?.metadata?.fullName?.takeIf { it.isNotBlank() }
+            ?: prefs.getString(KEY_FULL_NAME, null).orEmpty()
+        val savedMobile = currentInMemory?.metadata?.mobileNumber?.takeIf { it.isNotBlank() }
+            ?: prefs.getString(KEY_MOBILE_NUMBER, null).orEmpty()
+        val savedRealEmail = currentInMemory?.metadata?.email?.takeIf { it.isNotBlank() }
+            ?: prefs.getString(KEY_REAL_EMAIL, null).orEmpty()
+        val savedAuthEmail = currentInMemory?.email?.takeIf { it.isNotBlank() }
+            ?: prefs.getString(KEY_AUTH_EMAIL, null).orEmpty()
+
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("refresh_token", savedRefreshToken)
+                }
+                val req = Request.Builder()
+                    .url("${normalizedBaseUrl()}/auth/v1/token?grant_type=refresh_token")
+                    .addHeader("apikey", supabaseAnonKey.trim())
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                httpClient.newCall(req).execute().use { response ->
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = parseJsonOrNull(bodyText)
+                    if (!response.isSuccessful || json == null) {
+                        // Keep existing local session active; never auto-logout the user
+                        return@withContext _session.value != null
+                    }
+
+                    val accessToken = json.optString("access_token").orEmpty()
+                    val nextRefreshToken = json.optString("refresh_token").ifBlank { savedRefreshToken }
+                    val userObj = json.optJSONObject("user")
+                    val userId = userObj?.optString("id").orEmpty()
+                    if (accessToken.isBlank() || userId.isBlank()) {
+                        return@withContext _session.value != null
+                    }
+
+                    val authEmail = userObj?.optString("email")?.takeIf { it.isNotBlank() }
+                        ?: savedAuthEmail.ifBlank { savedRealEmail }
+                    val remoteProfile = dbClient.fetchClientProfile(accessToken, userId).getOrNull()
+                    val metaObj = userObj?.optJSONObject("user_metadata")
+
+                    val resolvedName = remoteProfile?.fullName?.trim()?.takeIf { it.length >= 2 }
+                        ?: savedName.takeIf { it.length >= 2 }
+                        ?: metaObj?.optString("full_name")?.trim()?.takeIf { it.length >= 2 }
+                        ?: "MILA Member"
+                    val resolvedMobile = remoteProfile?.mobileNumber?.trim()?.takeIf { it.length >= 7 && it != "Not Provided" }
+                        ?: savedMobile.takeIf { it.length >= 7 }
+                        ?: metaObj?.optString("mobile_number")?.trim().orEmpty()
+                    val resolvedDisplayEmail = remoteProfile?.email?.trim()?.takeIf { it.isNotBlank() }
+                        ?: savedRealEmail.ifBlank { authEmail }
+
+                    val metadata = SupabaseClientMetadata(
+                        fullName = resolvedName,
+                        email = resolvedDisplayEmail,
+                        mobileNumber = resolvedMobile,
+                        companyName = remoteProfile?.companyName?.ifBlank {
+                            currentInMemory?.metadata?.companyName ?: "MILA Hospitality Member"
+                        } ?: "MILA Hospitality Member",
+                        designation = remoteProfile?.designation?.ifBlank {
+                            currentInMemory?.metadata?.designation ?: "Client"
+                        } ?: "Client",
+                        city = remoteProfile?.city?.ifBlank {
+                            currentInMemory?.metadata?.city ?: "India"
+                        } ?: "India",
+                        businessCategory = remoteProfile?.resolvedBusinessCategory
+                            ?: currentInMemory?.metadata?.businessCategory
+                            ?: BusinessCategory.LUXURY_HOTEL_RESORT
+                    )
+
+                    val restored = SupabaseSession(
+                        accessToken = accessToken,
+                        refreshToken = nextRefreshToken,
+                        userId = userId,
+                        email = authEmail,
+                        metadata = metadata
+                    )
+
+                    persistSession(restored)
+                    lastRefreshSuccessAtMs = System.currentTimeMillis()
+                    syncClientTables(restored, metadata, userProfileEmailOverride = authEmail)
+                    _session.value = restored
+                    _pendingDraftProfile.value = metadata
+                    refreshClientEnquiries()
+                    true
+                }
+            } catch (_: Exception) {
+                // Network hiccup or offline: preserve active session so user never gets logged out
+                _session.value != null
+            }
+        }
     }
 
     suspend fun sendPhoneOtp(rawPhone: String, fullName: String = ""): Result<String> {
@@ -351,6 +720,8 @@ class SupabaseAuthClient(
             )
             // Always upsert on every login so Admin sees latest Name, Mobile Number, and Last Active time
             syncClientTables(session, metadata)
+            persistSession(session)
+            lastRefreshSuccessAtMs = System.currentTimeMillis()
             _session.value = session
             _pendingDraftProfile.value = metadata
             refreshClientEnquiries()
@@ -410,6 +781,8 @@ class SupabaseAuthClient(
                         email = metadata.email,
                         metadata = metadata
                     )
+                    persistSession(activeSession)
+                    lastRefreshSuccessAtMs = System.currentTimeMillis()
                     _session.value = activeSession
                     _pendingDraftProfile.value = metadata
                     syncClientTables(activeSession, metadata)
@@ -490,6 +863,8 @@ class SupabaseAuthClient(
                     val accessToken = json?.optString("access_token").orEmpty()
                     if (accessToken.isNotBlank()) {
                         val parsedSession = parseSession(json!!, fallbackMetadata = metadata)
+                        persistSession(parsedSession)
+                        lastRefreshSuccessAtMs = System.currentTimeMillis()
                         _session.value = parsedSession
                         _pendingDraftProfile.value = metadata
                         syncClientTables(parsedSession, metadata)
@@ -561,6 +936,8 @@ class SupabaseAuthClient(
                     val accessToken = json?.optString("access_token").orEmpty()
                     if (accessToken.isNotBlank()) {
                         val parsedSession = parseSession(json!!, fallbackMetadata = metadata)
+                        persistSession(parsedSession)
+                        lastRefreshSuccessAtMs = System.currentTimeMillis()
                         _session.value = parsedSession
                         _pendingDraftProfile.value = metadata
                         syncClientTables(parsedSession, metadata)
@@ -632,6 +1009,8 @@ class SupabaseAuthClient(
                     } else {
                         syncClientTables(parsedSession, parsedSession.metadata)
                     }
+                    persistSession(parsedSession)
+                    lastRefreshSuccessAtMs = System.currentTimeMillis()
                     _session.value = parsedSession
                     _pendingDraftProfile.value = parsedSession.metadata
                     refreshClientEnquiries()
@@ -724,6 +1103,7 @@ class SupabaseAuthClient(
                         email = metadata.email.trim(),
                         metadata = metadata
                     )
+                    persistSession(updatedSession)
                     _session.value = updatedSession
                     syncClientTables(updatedSession, metadata)
                     Result.success(updatedSession)
@@ -763,6 +1143,7 @@ class SupabaseAuthClient(
         return withContext(Dispatchers.IO) {
             try {
                 syncClientTables(updatedSession, updatedMetadata)
+                persistSession(updatedSession)
                 _session.value = updatedSession
                 _pendingDraftProfile.value = updatedMetadata
                 Result.success(updatedSession)
@@ -908,6 +1289,9 @@ class SupabaseAuthClient(
 
     suspend fun signOut() {
         val activeToken = _session.value?.accessToken
+        clearPersistedSession()
+        clearPendingEmailOtpDraft()
+        lastRefreshSuccessAtMs = 0L
         _session.value = null
         _pendingDraftProfile.value = null
         _myEnquiries.value = emptyList()
@@ -922,17 +1306,90 @@ class SupabaseAuthClient(
                         .build()
                     httpClient.newCall(httpRequest).execute().close()
                 } catch (_: Exception) {
-                    // Best-effort remote token revocation; local in-memory session is already cleared.
+                    // Best-effort remote token revocation; local session is already cleared.
                 }
             }
         }
     }
 
-    private suspend fun syncClientTables(session: SupabaseSession, metadata: SupabaseClientMetadata) {
+    private fun hydrateSessionFromStorage() {
+        val prefs = sessionPrefs ?: return
+        val isLoggedIn = prefs.getBoolean(KEY_IS_LOGGED_IN, false)
+        val userId = prefs.getString(KEY_USER_ID, null).orEmpty()
+        val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null).orEmpty()
+        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null).orEmpty()
+        if (!isLoggedIn || userId.isBlank() || (accessToken.isBlank() && refreshToken.isBlank())) {
+            return
+        }
+        val authEmail = prefs.getString(KEY_AUTH_EMAIL, null).orEmpty()
+        val displayEmail = prefs.getString(KEY_REAL_EMAIL, null).orEmpty().ifBlank { authEmail }
+        val metadata = SupabaseClientMetadata(
+            fullName = prefs.getString(KEY_FULL_NAME, null).orEmpty().ifBlank { "MILA Member" },
+            email = displayEmail,
+            mobileNumber = prefs.getString(KEY_MOBILE_NUMBER, null).orEmpty().ifBlank { "Not Provided" },
+            companyName = prefs.getString(KEY_COMPANY_NAME, null).orEmpty().ifBlank { "MILA Hospitality Member" },
+            designation = prefs.getString(KEY_DESIGNATION, null).orEmpty().ifBlank { "Client" },
+            city = prefs.getString(KEY_CITY, null).orEmpty().ifBlank { "India" },
+            businessCategory = BusinessCategory.fromRaw(
+                prefs.getString(KEY_BUSINESS_CATEGORY, null).orEmpty()
+            )
+        )
+        _session.value = SupabaseSession(
+            accessToken = accessToken,
+            refreshToken = refreshToken,
+            userId = userId,
+            email = authEmail.ifBlank { displayEmail },
+            metadata = metadata
+        )
+        _pendingDraftProfile.value = metadata
+    }
+
+    private fun persistSession(session: SupabaseSession) {
+        if (session.userId.isBlank()) return
+        sessionPrefs?.edit()
+            ?.putBoolean(KEY_IS_LOGGED_IN, true)
+            ?.putString(KEY_USER_ID, session.userId)
+            ?.putString(KEY_ACCESS_TOKEN, session.accessToken)
+            ?.putString(KEY_REFRESH_TOKEN, session.refreshToken)
+            ?.putString(KEY_FULL_NAME, session.metadata.fullName)
+            ?.putString(KEY_MOBILE_NUMBER, session.metadata.mobileNumber)
+            ?.putString(KEY_REAL_EMAIL, session.metadata.email)
+            ?.putString(KEY_AUTH_EMAIL, session.email)
+            ?.putString(KEY_COMPANY_NAME, session.metadata.companyName)
+            ?.putString(KEY_DESIGNATION, session.metadata.designation)
+            ?.putString(KEY_CITY, session.metadata.city)
+            ?.putString(KEY_BUSINESS_CATEGORY, session.metadata.businessCategory.name)
+            ?.commit()
+    }
+
+    private fun clearPersistedSession() {
+        sessionPrefs?.edit()
+            ?.remove(KEY_IS_LOGGED_IN)
+            ?.remove(KEY_USER_ID)
+            ?.remove(KEY_ACCESS_TOKEN)
+            ?.remove(KEY_REFRESH_TOKEN)
+            ?.remove(KEY_FULL_NAME)
+            ?.remove(KEY_MOBILE_NUMBER)
+            ?.remove(KEY_REAL_EMAIL)
+            ?.remove(KEY_AUTH_EMAIL)
+            ?.remove(KEY_COMPANY_NAME)
+            ?.remove(KEY_DESIGNATION)
+            ?.remove(KEY_CITY)
+            ?.remove(KEY_BUSINESS_CATEGORY)
+            ?.commit()
+    }
+
+    private suspend fun syncClientTables(
+        session: SupabaseSession,
+        metadata: SupabaseClientMetadata,
+        userProfileEmailOverride: String? = null
+    ) {
         if (!isConfigured() || session.userId.isBlank()) return
-        val safeEmail = metadata.email.trim().ifBlank { session.email.trim() }
+        val safeClientEmail = metadata.email.trim().ifBlank { session.email.trim() }
+        val safeUserProfileEmail = userProfileEmailOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: session.email.trim().ifBlank { safeClientEmail }
         val safeName = metadata.fullName.trim().takeIf { it.length >= 2 }
-            ?: safeEmail.substringBefore("@").takeIf { it.length >= 2 }
+            ?: safeClientEmail.substringBefore("@").takeIf { it.length >= 2 }
             ?: "MILA Client"
         val safeMobile = metadata.mobileNumber.trim().takeIf { it.length >= 7 } ?: "Not Provided"
         val safeCompany = metadata.companyName.trim().takeIf { it.length >= 2 } ?: "Hospitality Venture"
@@ -941,7 +1398,7 @@ class SupabaseAuthClient(
         dbClient.upsertUserProfile(
             accessToken = session.accessToken,
             userId = session.userId,
-            email = safeEmail,
+            email = safeUserProfileEmail,
             fullName = safeName,
             mobileNumber = safeMobile,
             accountType = "CLIENT"
@@ -952,7 +1409,7 @@ class SupabaseAuthClient(
             profile = ClientProfile(
                 userId = session.userId,
                 fullName = safeName,
-                email = safeEmail,
+                email = safeClientEmail,
                 mobileNumber = safeMobile,
                 companyName = safeCompany,
                 designation = safeDesignation,
@@ -1023,5 +1480,35 @@ class SupabaseAuthClient(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val PREFS_NAME = "mila_member_session"
+        private const val KEY_IS_LOGGED_IN = "is_logged_in"
+        private const val KEY_USER_ID = "user_id"
+        private const val KEY_ACCESS_TOKEN = "access_token"
+        private const val KEY_REFRESH_TOKEN = "refresh_token"
+        private const val KEY_FULL_NAME = "full_name"
+        private const val KEY_MOBILE_NUMBER = "mobile_number"
+        private const val KEY_REAL_EMAIL = "real_email"
+        private const val KEY_AUTH_EMAIL = "auth_email"
+        private const val KEY_COMPANY_NAME = "company_name"
+        private const val KEY_DESIGNATION = "designation"
+        private const val KEY_CITY = "city"
+        private const val KEY_BUSINESS_CATEGORY = "business_category"
+        private const val KEY_PENDING_OTP_EMAIL = "pending_otp_email"
+        private const val KEY_PENDING_OTP_NAME = "pending_otp_name"
+        private const val KEY_PENDING_OTP_MOBILE = "pending_otp_mobile"
+        private const val KEY_PENDING_OTP_SENT_AT = "pending_otp_sent_at"
+        private const val PENDING_OTP_TTL_MS = 30L * 60L * 1000L
+        private const val REFRESH_MIN_INTERVAL_MS = 5L * 60L * 1000L
+
+        @Volatile
+        private var sharedInstance: SupabaseAuthClient? = null
+
+        fun getInstance(context: Context): SupabaseAuthClient {
+            return sharedInstance ?: synchronized(this) {
+                sharedInstance ?: SupabaseAuthClient(context = context.applicationContext).also {
+                    sharedInstance = it
+                }
+            }
+        }
     }
 }

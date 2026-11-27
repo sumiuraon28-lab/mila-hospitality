@@ -25,9 +25,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Email
+import androidx.compose.material.icons.rounded.MarkEmailRead
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhoneAndroid
-import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -47,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +60,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -85,10 +89,17 @@ fun MilaAuthEntryScreen(
     supabaseAuthClient: SupabaseAuthClient,
     @Suppress("UNUSED_PARAMETER") supabaseTalentClient: SupabaseTalentClient
 ) {
-    var nameInput by remember { mutableStateOf("") }
-    var mobileInput by remember { mutableStateOf("") }
-    var otpCode by remember { mutableStateOf("") }
-    var otpSentToPhone by remember { mutableStateOf<String?>(null) }
+    val savedDraft = remember(supabaseAuthClient) { supabaseAuthClient.loadPendingEmailOtpDraft() }
+    var nameInput by rememberSaveable { mutableStateOf(savedDraft?.fullName.orEmpty()) }
+    var mobileInput by rememberSaveable {
+        mutableStateOf(savedDraft?.mobileNumber?.removePrefix("+91").orEmpty())
+    }
+    var emailInput by rememberSaveable { mutableStateOf(savedDraft?.email.orEmpty()) }
+    var otpCode by rememberSaveable { mutableStateOf("") }
+    var otpSentToEmail by rememberSaveable { mutableStateOf<String?>(savedDraft?.email) }
+    var normalizedMobileForVerify by rememberSaveable {
+        mutableStateOf(savedDraft?.mobileNumber.orEmpty())
+    }
     var isBusy by remember { mutableStateOf(false) }
     var inlineError by remember { mutableStateOf<String?>(null) }
 
@@ -238,7 +249,7 @@ fun MilaAuthEntryScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Single clean login card: Phone OTP or Continue with Google
+                    // Free Email OTP (6-digit code via Email) + Name & Mobile card
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface.copy(alpha = 0.95f)),
                         border = BorderStroke(1.dp, MilaGoldSubtle),
@@ -251,19 +262,19 @@ fun MilaAuthEntryScreen(
                             modifier = Modifier.padding(22.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            if (otpSentToPhone != null) {
+                            if (otpSentToEmail != null) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Rounded.Sms,
+                                        imageVector = Icons.Rounded.MarkEmailRead,
                                         contentDescription = null,
                                         tint = MilaChampagneGold,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Text(
-                                        text = "VERIFY OTP",
+                                        text = "VERIFY EMAIL OTP",
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             color = MilaChampagneGold,
                                             letterSpacing = 1.6.sp,
@@ -274,24 +285,24 @@ fun MilaAuthEntryScreen(
                             }
 
                             Text(
-                                text = if (otpSentToPhone == null) {
-                                    "Enter Your Name & Number"
+                                text = if (otpSentToEmail == null) {
+                                    "Sign In with Email OTP"
                                 } else {
-                                    "Enter Verification Code"
+                                    "Enter 6-Digit Email Code"
                                 },
                                 style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
                             )
 
                             Text(
-                                text = if (otpSentToPhone == null) {
-                                    "No registration needed — just verify your mobile number with OTP to open, explore, and request services."
+                                text = if (otpSentToEmail == null) {
+                                    "Enter your name, mobile number, and email address. We'll send a free 6-digit verification code to your email inbox."
                                 } else {
-                                    "We sent a 6-digit verification code to $otpSentToPhone."
+                                    "We sent a 6-digit verification code to $otpSentToEmail. Check your inbox or spam folder."
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
                             )
 
-                            if (otpSentToPhone == null) {
+                            if (otpSentToEmail == null) {
                                 OutlinedTextField(
                                     value = nameInput,
                                     onValueChange = { input ->
@@ -310,11 +321,12 @@ fun MilaAuthEntryScreen(
                                         )
                                     },
                                     singleLine = true,
+                                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                                     colors = milaFieldColors(),
                                     shape = MaterialTheme.shapes.small,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .testTag("otp_full_name_input")
+                                        .testTag("email_otp_full_name_input")
                                 )
 
                                 OutlinedTextField(
@@ -327,6 +339,13 @@ fun MilaAuthEntryScreen(
                                     },
                                     label = { Text("Mobile Number *", color = MilaWarmStone) },
                                     placeholder = { Text("98200 00000", color = MilaWarmStone) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PhoneAndroid,
+                                            contentDescription = null,
+                                            tint = MilaChampagneGold
+                                        )
+                                    },
                                     prefix = {
                                         Text(
                                             text = "+91 ",
@@ -340,18 +359,44 @@ fun MilaAuthEntryScreen(
                                     shape = MaterialTheme.shapes.small,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .testTag("otp_mobile_number_input")
+                                        .testTag("email_otp_mobile_number_input")
+                                )
+
+                                OutlinedTextField(
+                                    value = emailInput,
+                                    onValueChange = { input ->
+                                        if (input.length <= 120) {
+                                            emailInput = input
+                                            inlineError = null
+                                        }
+                                    },
+                                    label = { Text("Email Address *", color = MilaWarmStone) },
+                                    placeholder = { Text("you@example.com", color = MilaWarmStone) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Email,
+                                            contentDescription = null,
+                                            tint = MilaChampagneGold
+                                        )
+                                    },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                    colors = milaFieldColors(),
+                                    shape = MaterialTheme.shapes.small,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("email_otp_address_input")
                                 )
                             } else {
                                 OutlinedTextField(
                                     value = otpCode,
                                     onValueChange = { input ->
-                                        if (input.length <= 6 && input.all { it.isDigit() }) {
+                                        if (input.length <= 8 && input.all { it.isDigit() }) {
                                             otpCode = input
                                             inlineError = null
                                         }
                                     },
-                                    label = { Text("6-Digit OTP *", color = MilaWarmStone) },
+                                    label = { Text("6-Digit Email OTP *", color = MilaWarmStone) },
                                     placeholder = { Text("Enter 6-digit code", color = MilaWarmStone) },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -359,7 +404,7 @@ fun MilaAuthEntryScreen(
                                     shape = MaterialTheme.shapes.small,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .testTag("otp_code_input")
+                                        .testTag("email_otp_code_input")
                                 )
 
                                 Row(
@@ -369,32 +414,37 @@ fun MilaAuthEntryScreen(
                                 ) {
                                     TextButton(
                                         onClick = {
-                                            otpSentToPhone = null
+                                            supabaseAuthClient.clearPendingEmailOtpDraft()
+                                            otpSentToEmail = null
                                             otpCode = ""
                                             inlineError = null
                                         },
                                         enabled = !isBusy,
                                         modifier = Modifier
                                             .minimumInteractiveComponentSize()
-                                            .testTag("otp_change_number_button")
+                                            .testTag("email_otp_change_details_button")
                                     ) {
-                                        Text("Change Number", color = MilaIvoryMuted)
+                                        Text("Change Details", color = MilaIvoryMuted)
                                     }
                                     TextButton(
                                         onClick = {
-                                            val target = otpSentToPhone ?: return@TextButton
+                                            val targetEmail = otpSentToEmail ?: return@TextButton
                                             scope.launch {
                                                 inlineError = null
                                                 isBusy = true
-                                                val res = supabaseAuthClient.sendPhoneOtp(target)
+                                                val res = supabaseAuthClient.sendEmailOtp(
+                                                    email = targetEmail,
+                                                    fullName = nameInput.trim(),
+                                                    rawPhone = normalizedMobileForVerify.ifBlank { mobileInput }
+                                                )
                                                 isBusy = false
                                                 res.fold(
                                                     onSuccess = { sent ->
-                                                        snackbarHostState.showSnackbar("OTP resent to $sent")
+                                                        snackbarHostState.showSnackbar("New OTP code sent to $sent")
                                                     },
                                                     onFailure = { err ->
                                                         inlineError = err.localizedMessage
-                                                            ?: "Could not resend OTP."
+                                                            ?: "Could not resend code right now."
                                                     }
                                                 )
                                             }
@@ -402,9 +452,9 @@ fun MilaAuthEntryScreen(
                                         enabled = !isBusy,
                                         modifier = Modifier
                                             .minimumInteractiveComponentSize()
-                                            .testTag("otp_resend_button")
+                                            .testTag("email_otp_resend_button")
                                     ) {
-                                        Text("Resend OTP", color = MilaChampagneGold)
+                                        Text("Resend Code", color = MilaChampagneGold)
                                     }
                                 }
                             }
@@ -431,66 +481,73 @@ fun MilaAuthEntryScreen(
 
                             GoldFilledButton(
                                 text = when {
-                                    isBusy && otpSentToPhone == null -> "Sending OTP..."
-                                    isBusy && otpSentToPhone != null -> "Verifying OTP..."
-                                    otpSentToPhone == null -> "Get OTP"
-                                    else -> "Verify & Login"
+                                    isBusy && otpSentToEmail == null -> "Sending Email OTP..."
+                                    isBusy && otpSentToEmail != null -> "Verifying Code..."
+                                    otpSentToEmail == null -> "Send 6-Digit Email OTP"
+                                    else -> "Verify & Sign In"
                                 },
                                 enabled = !isBusy,
-                                testTag = if (otpSentToPhone == null) "get_otp_button" else "submit_otp_button",
+                                testTag = if (otpSentToEmail == null) "send_email_otp_button" else "verify_email_otp_button",
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
-                                    if (otpSentToPhone == null) {
-                                        if (nameInput.trim().length < 2) {
-                                            inlineError = "Please enter your name."
+                                    if (otpSentToEmail == null) {
+                                        val cleanName = nameInput.trim()
+                                        if (cleanName.length < 2) {
+                                            inlineError = "Please enter your full name."
                                             return@GoldFilledButton
                                         }
-                                        val normalized = SupabaseAuthValidator.normalizePhoneE164(mobileInput)
-                                        if (normalized == null) {
+                                        val normalizedPhone = SupabaseAuthValidator.normalizePhoneE164(mobileInput)
+                                        if (normalizedPhone == null) {
                                             inlineError = "Please enter a valid 10-digit mobile number."
+                                            return@GoldFilledButton
+                                        }
+                                        val cleanEmail = emailInput.trim().lowercase()
+                                        if (!SupabaseAuthValidator.isValidEmail(cleanEmail)) {
+                                            inlineError = "Please enter a valid email address."
                                             return@GoldFilledButton
                                         }
                                         scope.launch {
                                             inlineError = null
                                             isBusy = true
-                                            val result = supabaseAuthClient.sendPhoneOtp(normalized, nameInput.trim())
+                                            val result = supabaseAuthClient.sendEmailOtp(
+                                                email = cleanEmail,
+                                                fullName = cleanName,
+                                                rawPhone = normalizedPhone
+                                            )
                                             isBusy = false
                                             result.fold(
-                                                onSuccess = { sentPhone ->
-                                                    otpSentToPhone = sentPhone
+                                                onSuccess = { sentEmail ->
+                                                    normalizedMobileForVerify = normalizedPhone
+                                                    otpSentToEmail = sentEmail
                                                     otpCode = ""
-                                                    snackbarHostState.showSnackbar("OTP sent to $sentPhone")
+                                                    snackbarHostState.showSnackbar("6-digit OTP sent to $sentEmail")
                                                 },
                                                 onFailure = { err ->
                                                     inlineError = err.localizedMessage
-                                                        ?: "Could not send OTP. Use Continue with Google below."
+                                                        ?: "Could not send Email OTP. Please try again or use Continue with Google."
                                                 }
                                             )
                                         }
                                     } else {
-                                        val targetPhone = otpSentToPhone ?: return@GoldFilledButton
-                                        if (otpCode.length < 4) {
-                                            inlineError = "Please enter the OTP sent to your mobile."
+                                        val targetEmail = otpSentToEmail ?: return@GoldFilledButton
+                                        if (otpCode.trim().length < 6) {
+                                            inlineError = "Please enter the 6-digit OTP sent to your email."
                                             return@GoldFilledButton
                                         }
                                         scope.launch {
                                             inlineError = null
                                             isBusy = true
-                                            val result = supabaseAuthClient.verifyPhoneOtp(targetPhone, otpCode)
-                                            result.fold(
-                                                onSuccess = { verified ->
-                                                    supabaseAuthClient.activatePhoneOtpSession(
-                                                        verifiedPhone = verified,
-                                                        enteredFullName = nameInput.trim()
-                                                    )
-                                                    isBusy = false
-                                                },
-                                                onFailure = { err ->
-                                                    isBusy = false
-                                                    inlineError = err.localizedMessage
-                                                        ?: "Invalid OTP. Please check and try again."
-                                                }
+                                            val result = supabaseAuthClient.verifyEmailOtp(
+                                                email = targetEmail,
+                                                otpCode = otpCode.trim(),
+                                                fullName = nameInput.trim(),
+                                                rawPhone = normalizedMobileForVerify.ifBlank { mobileInput }
                                             )
+                                            isBusy = false
+                                            result.onFailure { err ->
+                                                inlineError = err.localizedMessage
+                                                    ?: "Invalid or expired OTP code. Please check your inbox and try again."
+                                            }
                                         }
                                     }
                                 }
@@ -527,6 +584,154 @@ fun MilaAuthEntryScreen(
             }
         }
     }
+}
+
+@Composable
+fun GoogleMobilePromptDialog(
+    initialName: String,
+    userEmail: String,
+    isSaving: Boolean,
+    errorMessage: String?,
+    onSave: (fullName: String, normalizedMobile: String) -> Unit,
+    onSkip: () -> Unit
+) {
+    var nameInput by remember(initialName) { mutableStateOf(initialName) }
+    var mobileInput by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    val displayedError = localError ?: errorMessage
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onSkip() },
+        containerColor = MilaCharcoalSurface,
+        titleContentColor = MilaIvory,
+        textContentColor = MilaIvoryMuted,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PhoneAndroid,
+                        contentDescription = null,
+                        tint = MilaChampagneGold,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "ONE QUICK STEP",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = MilaChampagneGold,
+                            letterSpacing = 1.6.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
+                Text(
+                    text = "Add Your Mobile Number",
+                    style = MaterialTheme.typography.headlineSmall.copy(color = MilaIvory)
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Add your mobile number so MILA Hospitality consultants can reach you for openings, advisory, and career updates.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
+                )
+
+                if (userEmail.isNotBlank()) {
+                    Text(
+                        text = "Signed in as $userEmail",
+                        style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { input ->
+                        if (input.length <= 80) {
+                            nameInput = input
+                            localError = null
+                        }
+                    },
+                    label = { Text("Your Name *", color = MilaWarmStone) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                    colors = milaFieldColors(),
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("google_mobile_prompt_name")
+                )
+
+                OutlinedTextField(
+                    value = mobileInput,
+                    onValueChange = { input ->
+                        if (input.length <= 15) {
+                            mobileInput = input
+                            localError = null
+                        }
+                    },
+                    label = { Text("Mobile Number *", color = MilaWarmStone) },
+                    placeholder = { Text("98200 00000", color = MilaWarmStone) },
+                    prefix = {
+                        Text(
+                            text = "+91 ",
+                            color = MilaChampagneGold,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = milaFieldColors(),
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("google_mobile_prompt_number")
+                )
+
+                displayedError?.let { err ->
+                    Text(
+                        text = err,
+                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFF6B7B0))
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            GoldFilledButton(
+                text = if (isSaving) "Saving..." else "Save & Continue",
+                enabled = !isSaving,
+                testTag = "google_mobile_prompt_save_button",
+                onClick = {
+                    val cleanName = nameInput.trim()
+                    if (cleanName.length < 2) {
+                        localError = "Please enter your name."
+                        return@GoldFilledButton
+                    }
+                    val normalized = SupabaseAuthValidator.normalizePhoneE164(mobileInput)
+                    if (normalized == null) {
+                        localError = "Please enter a valid 10-digit mobile number."
+                        return@GoldFilledButton
+                    }
+                    localError = null
+                    onSave(cleanName, normalized)
+                }
+            )
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onSkip,
+                enabled = !isSaving,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("google_mobile_prompt_skip_button")
+            ) {
+                Text("Not Now", color = MilaIvoryMuted)
+            }
+        }
+    )
 }
 
 @Composable

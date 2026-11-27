@@ -673,7 +673,7 @@
           mobileNumber: "",
           email: "",
           accountType: "CLIENT",
-          loginMethod: "Email / Google",
+          loginMethod: "Email OTP",
           city: "",
           companyName: "",
           designation: "",
@@ -699,9 +699,10 @@
       if (u.mobile_number && u.mobile_number !== "Not Provided") entry.mobileNumber = u.mobile_number.trim();
       if (u.email) {
         if (isSyntheticPhoneEmail(u.email)) {
-          entry.loginMethod = "Phone OTP";
+          entry.loginMethod = "Mobile";
         } else {
           entry.email = u.email.trim();
+          entry.loginMethod = "Email OTP";
         }
       }
       entry.accountType = u.account_type || entry.accountType;
@@ -719,8 +720,12 @@
       entry.clientRow = c;
       if (isPlaceholderName(entry.fullName) && !isPlaceholderName(c.full_name)) entry.fullName = c.full_name.trim();
       if (!entry.mobileNumber && c.mobile_number && c.mobile_number !== "Not Provided") entry.mobileNumber = c.mobile_number.trim();
-      if (!entry.email && c.email && !isSyntheticPhoneEmail(c.email)) entry.email = c.email.trim();
-      if (isSyntheticPhoneEmail(c.email)) entry.loginMethod = "Phone OTP";
+      if (c.email && !isSyntheticPhoneEmail(c.email)) {
+        entry.email = c.email.trim();
+        entry.loginMethod = "Email OTP";
+      } else if (isSyntheticPhoneEmail(c.email) && !entry.email) {
+        entry.loginMethod = "Mobile";
+      }
       if (c.city && c.city !== "India") entry.city = c.city;
       if (c.company_name && c.company_name !== "MILA Hospitality Member") entry.companyName = c.company_name;
       if (c.designation && c.designation !== "Client") entry.designation = c.designation;
@@ -1215,7 +1220,7 @@
     return el("div", { className: "record-card" }, [
       el("div", { className: "record-top" }, [
         el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
-          pill(user.loginMethod, user.loginMethod === "Phone OTP" ? "emerald" : "gold"),
+          pill(user.loginMethod, user.loginMethod === "Email OTP" ? "emerald" : "gold"),
           user.enquiriesCount > 0 ? pill(user.enquiriesCount + " Enquiries", "gold") : null,
           user.hasCv ? pill("CV Ready", "emerald") : null
         ]),
@@ -1246,18 +1251,18 @@
     container.appendChild(
       renderModuleHeader(
         "Logged-In App Users",
-        "Live directory of everyone logged in and using the MILA Hospitality app — with Name, Mobile Number, last active time, and enquiry/job activity (" + allUsers.length + " total)."
+        "Live directory of everyone logged in and using the MILA Hospitality app — with Name, Mobile Number, Email, last active time, and enquiry/job activity (" + allUsers.length + " total)."
       )
     );
     container.appendChild(
-      renderSearchBar("Search by name, mobile number, email, or city...", ["PHONE_OTP", "WITH_ENQUIRIES", "JOB_SEEKERS"])
+      renderSearchBar("Search by name, mobile number, email, or city...", ["EMAIL_OTP", "WITH_ENQUIRIES", "JOB_SEEKERS"])
     );
 
     const q = state.searchQuery.trim().toLowerCase();
     const rows = allUsers.filter((u) => {
       const matchFilter =
         state.statusFilter === "ALL" ||
-        (state.statusFilter === "PHONE_OTP" && u.loginMethod === "Phone OTP") ||
+        (state.statusFilter === "EMAIL_OTP" && u.loginMethod === "Email OTP") ||
         (state.statusFilter === "WITH_ENQUIRIES" && u.enquiriesCount > 0) ||
         (state.statusFilter === "JOB_SEEKERS" && (u.applicationsCount > 0 || u.hasCv || Boolean(u.candidateRow)));
       const matchQ =
@@ -1335,7 +1340,7 @@
             })
           );
         }
-        const cleanEmail = isSyntheticPhoneEmail(client.email) ? "Phone OTP Member" : (client.email || "");
+        const cleanEmail = isSyntheticPhoneEmail(client.email) ? "Mobile Login Member" : (client.email || "");
         const lastSeen = formatTimestamp(client.updated_at || client.created_at);
         list.appendChild(
           el("div", { className: "record-card" }, [

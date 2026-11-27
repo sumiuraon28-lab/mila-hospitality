@@ -7,15 +7,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.outlined.Apartment
@@ -32,6 +39,7 @@ import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.ContactMail
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Work
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -59,14 +68,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -77,6 +93,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.auth.SupabaseAuthClient
+import com.example.auth.SupabaseAuthValidator
 import com.example.auth.SupabaseCandidateSession
 import com.example.auth.SupabaseSession
 import com.example.auth.SupabaseTalentClient
@@ -112,6 +129,7 @@ import com.example.ui.screens.AtelierScreen
 import com.example.ui.screens.ClientLoginScreen
 import com.example.ui.screens.ContactUsScreen
 import com.example.ui.screens.EnquiryConfirmationDialog
+import com.example.ui.screens.GoogleMobilePromptDialog
 import com.example.ui.screens.IndustriesWeServeScreen
 import com.example.ui.screens.JobSeekerLoginScreen
 import com.example.ui.screens.MilaAuthEntryScreen
@@ -177,9 +195,7 @@ private val allPagesDirectory = listOf(
     DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/recruitment-talent-acquisition", "06. Recruitment & Talent", "8 Service Categories", Icons.Outlined.PersonSearch),
     DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/business-concept-development", "07. Business & Concept Dev.", "8 Service Categories", Icons.Outlined.CollectionsBookmark),
     DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/hospitality-management-solutions", "08. Management Solutions", "8 Service Categories", Icons.Outlined.Apartment),
-    DrawerNavEntry(ROUTE_CONTACT, "Contact Us", "Connect & Portals", Icons.Outlined.ContactMail),
-    DrawerNavEntry(ROUTE_CLIENT_LOGIN, "My Account & Enquiries", "Connect & Portals", Icons.Outlined.ContactMail),
-    DrawerNavEntry(ROUTE_JOB_SEEKER_LOGIN, "Job Seeker Profile & CV", "Connect & Portals", Icons.Outlined.PersonSearch)
+    DrawerNavEntry(ROUTE_CONTACT, "Contact Us", "Connect", Icons.Outlined.ContactMail)
 )
 
 class MainActivity : ComponentActivity() {
@@ -206,9 +222,10 @@ private fun firestoreOrNull(context: Context): FirebaseFirestore? = runCatching 
 @Composable
 fun MilaAppRoot() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
-    val supabaseAuthClient = remember { SupabaseAuthClient() }
+    val supabaseAuthClient = remember(context) { SupabaseAuthClient.getInstance(context) }
     val supabaseSession by supabaseAuthClient.session.collectAsStateWithLifecycle()
     val pendingDraftProfile by supabaseAuthClient.pendingDraftProfile.collectAsStateWithLifecycle()
     val supabaseTalentClient = remember { SupabaseTalentClient() }
@@ -220,13 +237,31 @@ fun MilaAppRoot() {
     }.collectAsStateWithLifecycle(initialValue = firebaseAuth?.currentUser)
 
     LaunchedEffect(Unit) {
-        attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            onAuthSuccess = {},
-            onUnauthenticated = {},
-            scope = scope
-        )
+        supabaseAuthClient.restoreSavedSession()
+        if (supabaseAuthClient.session.value == null) {
+            attemptAutoSignIn(
+                context = context,
+                credentialManager = credentialManager,
+                onAuthSuccess = {},
+                onUnauthenticated = {},
+                scope = scope
+            )
+        }
+    }
+
+    // Silently keep the Supabase session token fresh whenever the user returns from another app
+    DisposableEffect(lifecycleOwner, supabaseAuthClient) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && supabaseAuthClient.hasSavedSession()) {
+                scope.launch {
+                    supabaseAuthClient.restoreSavedSession()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(supabaseSession?.userId, supabaseSession?.accessToken) {
@@ -431,6 +466,28 @@ private fun MilaAppShell(
 
     val clientProfile = (clientProfileState as? UiState.Success)?.data
     val candidateProfile = (candidateProfileState as? UiState.Success)?.data
+    var googleMobilePromptDismissed by remember(currentUser?.uid) { mutableStateOf(false) }
+    var isSavingGoogleMobile by remember { mutableStateOf(false) }
+    var googleMobileError by remember { mutableStateOf<String?>(null) }
+
+    val existingGooglePhone = remember(clientProfile?.mobileNumber) {
+        clientProfile?.mobileNumber?.let { SupabaseAuthValidator.normalizePhoneE164(it) }
+    }
+
+    val shouldPromptGoogleMobile = remember(
+        currentUser?.uid,
+        supabaseSession?.userId,
+        clientProfileState,
+        existingGooglePhone,
+        googleMobilePromptDismissed
+    ) {
+        currentUser != null &&
+            supabaseSession == null &&
+            existingGooglePhone == null &&
+            clientProfileState !is UiState.Loading &&
+            !googleMobilePromptDismissed
+    }
+
     val savedRoleIds: Set<String> = remember(savedRolesState, supabaseSavedRoles) {
         val firestoreIds = (savedRolesState as? UiState.Success)?.data?.map { it.roleId }?.toSet() ?: emptySet()
         val supabaseIds = supabaseSavedRoles.map { it.roleId }.toSet()
@@ -971,5 +1028,50 @@ private fun MilaAppShell(
                 }
             )
         }
+    }
+
+    if (shouldPromptGoogleMobile && currentUser != null) {
+        val initialGoogleName = remember(currentUser.uid, clientProfile?.fullName, currentUser.displayName) {
+            clientProfile?.fullName?.trim()?.takeIf { it.length >= 2 }
+                ?: currentUser.displayName?.trim().orEmpty()
+        }
+        GoogleMobilePromptDialog(
+            initialName = initialGoogleName,
+            userEmail = currentUser.email.orEmpty(),
+            isSaving = isSavingGoogleMobile,
+            errorMessage = googleMobileError,
+            onSave = { cleanName, normalizedMobile ->
+                scope.launch {
+                    isSavingGoogleMobile = true
+                    googleMobileError = null
+                    val baseProfile = clientProfile ?: ClientProfile(
+                        fullName = cleanName,
+                        email = currentUser.email.orEmpty(),
+                        mobileNumber = normalizedMobile,
+                        companyName = "MILA Hospitality Member",
+                        designation = "Client",
+                        city = "India"
+                    )
+                    mandatesViewModel?.saveClientProfile(
+                        baseProfile.copy(
+                            fullName = cleanName,
+                            email = currentUser.email.orEmpty().ifBlank { baseProfile.email },
+                            mobileNumber = normalizedMobile
+                        )
+                    ) {
+                        isSavingGoogleMobile = false
+                        googleMobilePromptDismissed = true
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Welcome, $cleanName! Mobile number saved.")
+                        }
+                    }
+                    if (mandatesViewModel == null) {
+                        isSavingGoogleMobile = false
+                        googleMobilePromptDismissed = true
+                    }
+                }
+            },
+            onSkip = { googleMobilePromptDismissed = true }
+        )
     }
 }
