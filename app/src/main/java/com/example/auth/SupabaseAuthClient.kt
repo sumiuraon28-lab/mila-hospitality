@@ -221,7 +221,7 @@ class SupabaseAuthClient(
                             rawMsg.contains("phone logins are disabled", ignoreCase = true) ||
                             rawMsg.contains("unsupported", ignoreCase = true)
                         ) {
-                            "SMS OTP provider is not enabled on Supabase yet. Please use Email & Password to sign in or register right away."
+                            "SMS OTP provider is not enabled on Supabase yet. Please use Continue with Google below to sign in right away."
                         } else {
                             rawMsg
                         }
@@ -293,6 +293,50 @@ class SupabaseAuthClient(
             }
         }
     }
+
+    suspend fun activatePhoneOtpSession(verifiedPhone: VerifiedPhoneOtpSession): SupabaseSession =
+        withContext(Dispatchers.IO) {
+            val remoteProfile = dbClient
+                .fetchClientProfile(verifiedPhone.accessToken, verifiedPhone.userId)
+                .getOrNull()
+            val fallbackEmail = remoteProfile?.email?.takeIf { it.isNotBlank() }
+                ?: "${verifiedPhone.phone.filter { it.isDigit() }}@phone.mila.local"
+            val metadata = if (remoteProfile != null) {
+                SupabaseClientMetadata(
+                    fullName = remoteProfile.fullName,
+                    email = remoteProfile.email,
+                    mobileNumber = remoteProfile.mobileNumber.ifBlank { verifiedPhone.phone },
+                    companyName = remoteProfile.companyName,
+                    designation = remoteProfile.designation,
+                    city = remoteProfile.city,
+                    businessCategory = remoteProfile.resolvedBusinessCategory
+                )
+            } else {
+                SupabaseClientMetadata(
+                    fullName = "MILA Guest",
+                    email = fallbackEmail,
+                    mobileNumber = verifiedPhone.phone,
+                    companyName = "MILA Hospitality Member",
+                    designation = "Client",
+                    city = "India",
+                    businessCategory = BusinessCategory.LUXURY_HOTEL_RESORT
+                )
+            }
+            val session = SupabaseSession(
+                accessToken = verifiedPhone.accessToken,
+                refreshToken = verifiedPhone.refreshToken,
+                userId = verifiedPhone.userId,
+                email = metadata.email,
+                metadata = metadata
+            )
+            if (remoteProfile == null) {
+                syncClientTables(session, metadata)
+            }
+            _session.value = session
+            _pendingDraftProfile.value = metadata
+            refreshClientEnquiries()
+            session
+        }
 
     suspend fun completeMilaAccountAfterOtp(
         verifiedPhone: VerifiedPhoneOtpSession,
@@ -861,7 +905,7 @@ class SupabaseAuthClient(
         )
     }
 
-    private fun normalizedBaseUrl(): String = supabaseUrl.trim().trimEnd('/')
+    private fun normalizedBaseUrl(): String = SupabaseConfig.normalizedBaseUrl(supabaseUrl)
 
     private fun SupabaseClientMetadata.toJson(): JSONObject = JSONObject().apply {
         put("full_name", fullName.trim())

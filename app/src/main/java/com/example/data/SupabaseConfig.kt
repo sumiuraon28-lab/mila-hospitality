@@ -1,6 +1,7 @@
 package com.example.data
 
 import com.example.BuildConfig
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -20,16 +21,39 @@ object SupabaseConfig {
         url: String = BuildConfig.SUPABASE_URL,
         anonKey: String = BuildConfig.SUPABASE_ANON_KEY
     ): Boolean {
-        val cleanUrl = url.trim().trimEnd('/')
-        val cleanKey = anonKey.trim()
+        val cleanUrl = normalizedBaseUrl(url)
+        val cleanKey = anonKey.trim().trim('"', '\'')
         if (!cleanUrl.startsWith("https://") || cleanUrl == "YOUR_SUPABASE_URL") return false
         if (cleanKey.isEmpty() || cleanKey == "YOUR_SUPABASE_ANON_KEY") return false
         if (looksLikeServiceRoleKey(cleanKey)) return false
         return true
     }
 
-    fun normalizedBaseUrl(url: String = BuildConfig.SUPABASE_URL): String =
-        url.trim().trimEnd('/')
+    fun normalizedBaseUrl(url: String = BuildConfig.SUPABASE_URL): String {
+        var clean = url.trim().trim('"', '\'')
+        if (clean.contains("google.com/url", ignoreCase = true) && clean.contains("?")) {
+            val query = clean.substringAfter('?', "")
+            val targetParam = query.split('&')
+                .firstOrNull { it.startsWith("q=") || it.startsWith("url=") }
+                ?.substringAfter('=')
+            if (!targetParam.isNullOrBlank()) {
+                clean = try {
+                    URLDecoder.decode(targetParam, StandardCharsets.UTF_8.name()).trim()
+                } catch (_: Exception) {
+                    clean
+                }
+            }
+        }
+        if (
+            clean.isNotEmpty() &&
+            !clean.startsWith("http://", ignoreCase = true) &&
+            !clean.startsWith("https://", ignoreCase = true) &&
+            clean.contains(".supabase.co", ignoreCase = true)
+        ) {
+            clean = "https://$clean"
+        }
+        return clean.trimEnd('/')
+    }
 
     private val serviceRoleRegex = Regex("\"role\"\\s*:\\s*\"service_role\"", RegexOption.IGNORE_CASE)
 

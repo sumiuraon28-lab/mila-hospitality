@@ -690,7 +690,7 @@ class SupabaseTalentClient(
         )
     }
 
-    private fun normalizedBaseUrl(): String = supabaseUrl.trim().trimEnd('/')
+    private fun normalizedBaseUrl(): String = SupabaseConfig.normalizedBaseUrl(supabaseUrl)
 
     private fun parseJsonOrNull(raw: String): JSONObject? = try {
         if (raw.isBlank()) null else JSONObject(raw)
