@@ -553,7 +553,7 @@ class SupabaseDatabaseClient(
             put("admin_reply", "")
             put("admin_replied_by", "")
             put("sort_order", 10)
-            put("published", true)
+            put("published", false)
         }
         executeMutation(
             method = "POST",

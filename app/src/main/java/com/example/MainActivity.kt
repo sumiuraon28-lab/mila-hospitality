@@ -731,7 +731,7 @@ private fun MilaAppShell(
                                                 res.fold(
                                                     onSuccess = {
                                                         onSuccess()
-                                                        snackbarHostState.showSnackbar("Thank you! Your review has been published.")
+                                                        snackbarHostState.showSnackbar("Thank you! Your review has been submitted for MILA team approval.")
                                                     },
                                                     onFailure = { err ->
                                                         snackbarHostState.showSnackbar(err.localizedMessage ?: "Could not publish review right now.")

@@ -73,7 +73,7 @@ fun ClientReviewSheet(
             style = MaterialTheme.typography.headlineMedium.copy(color = MilaIvory)
         )
         Text(
-            text = "Share your experience working with MILA Hospitality Consultant. Reviews are published live and our partner team can respond directly.",
+            text = "Share your experience working with MILA Hospitality Consultant. Reviews are verified by our team before appearing in the app.",
             style = MaterialTheme.typography.bodyMedium.copy(color = MilaIvoryMuted)
         )
 
@@ -158,7 +158,7 @@ fun ClientReviewSheet(
 
             Spacer(modifier = Modifier.height(4.dp))
             GoldFilledButton(
-                text = if (isSubmitting) "Publishing Review..." else "Publish Review",
+                text = if (isSubmitting) "Submitting Review..." else "Submit for Review",
                 onClick = {
                     val cleanName = reviewerName.trim()
                     val cleanQuote = quote.trim()

@@ -326,7 +326,6 @@ fun MixologySpotlightCard(
 @Composable
 fun HomeRecruitmentSection(
     onBrowseCareers: () -> Unit,
-    onJobSeekerPortal: () -> Unit,
     openRoles: List<HospitalityRole> = MilaCatalog.openRoles,
     modifier: Modifier = Modifier
 ) {
@@ -337,7 +336,7 @@ fun HomeRecruitmentSection(
         SectionHeading(
             eyebrow = "MILA Talent • Recruitment",
             title = "Hospitality Executive Search & Careers",
-            subtitle = "Connecting properties with vetted General Managers, Executive Chefs, Mixologists, and opening teams—with a dedicated career portal for candidates."
+            subtitle = "Connecting properties with vetted General Managers, Executive Chefs, Mixologists, and pre-opening hospitality teams."
         )
 
         openRoles.take(2).forEach { role ->
@@ -378,28 +377,17 @@ fun HomeRecruitmentSection(
 
         GoldFilledButton(
             text = "I AM LOOKING FOR A JOB",
-            onClick = onJobSeekerPortal,
+            onClick = onBrowseCareers,
             testTag = "iam_looking_for_job_button",
             modifier = Modifier.fillMaxWidth()
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            GoldOutlineButton(
-                text = "View All Careers",
-                onClick = onBrowseCareers,
-                testTag = "home_view_careers_button",
-                modifier = Modifier.weight(1f)
-            )
-            GoldOutlineButton(
-                text = "Job Seeker Portal",
-                onClick = onJobSeekerPortal,
-                testTag = "home_job_seeker_cta",
-                modifier = Modifier.weight(1f)
-            )
-        }
+        GoldOutlineButton(
+            text = "View All Careers",
+            onClick = onBrowseCareers,
+            testTag = "home_view_careers_button",
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

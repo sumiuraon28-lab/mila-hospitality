@@ -577,7 +577,7 @@
           const brandNewReviews = incomingReviews.filter((r) => r.id && !state.knownReviewIds.has(r.id));
           if (brandNewReviews.length > 0) {
             const newestRev = brandNewReviews[0];
-            showToast("New client review submitted by " + (newestRev.attribution_role || "Client"));
+            showToast("New client review awaiting approval from " + (newestRev.attribution_role || "Client"));
           } else {
             const brandNewUsers = incomingUsers.filter((u) => u.userId && !state.knownUserIds.has(u.userId));
             if (brandNewUsers.length > 0) {
@@ -2216,6 +2216,7 @@
   function renderReviewsManager(container) {
     const writable = canWrite("testimonials");
     const allItems = state.data.testimonials || [];
+    const pendingCount = allItems.filter((r) => !r.published).length;
     const needsReplyCount = allItems.filter((r) => !(r.admin_reply || "").trim()).length;
     const addBtn = writable
       ? el("button", { className: "btn btn-gold", type: "button", text: "+ Add Review", onClick: () => openReviewEditorModal(null) })
@@ -2224,17 +2225,17 @@
     container.appendChild(
       renderModuleHeader(
         "Client Reviews & Testimonials",
-        "Read client reviews, publish official MILA replies, hide/publish, or delete reviews (" + allItems.length + " total • " + needsReplyCount + " awaiting reply).",
+        "Approve or delete pending client reviews, publish official MILA replies, or manage featured testimonials (" + allItems.length + " total • " + pendingCount + " pending approval • " + needsReplyCount + " awaiting reply).",
         addBtn
       )
     );
 
     const filterOptions = [
       { id: "ALL", label: "All (" + allItems.length + ")" },
+      { id: "HIDDEN", label: "Pending Approval (" + pendingCount + ")" },
       { id: "NEEDS_REPLY", label: "Awaiting Reply (" + needsReplyCount + ")" },
       { id: "REPLIED", label: "Replied (" + (allItems.length - needsReplyCount) + ")" },
-      { id: "APP_USER", label: "App Users (" + allItems.filter((r) => r.source === "APP_USER").length + ")" },
-      { id: "HIDDEN", label: "Hidden (" + allItems.filter((r) => !r.published).length + ")" }
+      { id: "APP_USER", label: "App Users (" + allItems.filter((r) => r.source === "APP_USER").length + ")" }
     ];
 
     const activeFilter = filterOptions.some((f) => f.id === state.statusFilter) ? state.statusFilter : "ALL";
@@ -2301,9 +2302,12 @@
         const hasReply = Boolean((item.admin_reply || "").trim());
         const isAppUser = item.source === "APP_USER";
         const topLeftPills = el("div", { className: "stage-chips" }, [
-          pill(item.published ? "Published" : "Hidden", item.published ? "emerald" : "muted"),
+          pill(
+            item.published ? "Published" : (isAppUser ? "Pending Approval" : "Hidden"),
+            item.published ? "emerald" : "alert"
+          ),
           pill(isAppUser ? "App User Review" : "Admin Testimonial", isAppUser ? "gold" : "muted"),
-          pill(hasReply ? "Replied" : "Awaiting Reply", hasReply ? "emerald" : "alert")
+          pill(hasReply ? "Replied" : "Awaiting Reply", hasReply ? "emerald" : "muted")
         ]);
 
         const metaParts = [item.engagement_context || ""];
@@ -2336,9 +2340,29 @@
         }
 
         if (writable) {
-          const actions = [
+          const actions = [];
+          if (!item.published) {
+            actions.push(
+              el("button", {
+                className: "btn btn-gold btn-sm",
+                type: "button",
+                text: "Approve & Publish",
+                onClick: async () => {
+                  await mutateTable(
+                    "PATCH",
+                    "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id),
+                    { published: true },
+                    { module: "TESTIMONIALS", action: "UPDATE", targetId: item.id, summary: "Approved & published review from " + (item.attribution_role || "Client") }
+                  );
+                  showToast("Review approved and published to the MILA app.");
+                  await refreshAllData(false);
+                }
+              })
+            );
+          }
+          actions.push(
             el("button", {
-              className: hasReply ? "btn btn-outline btn-sm" : "btn btn-gold btn-sm",
+              className: (item.published && !hasReply) ? "btn btn-gold btn-sm" : "btn btn-outline btn-sm",
               type: "button",
               text: hasReply ? "Edit Reply" : "Reply",
               onClick: () => openReviewReplyModal(item)
@@ -2348,22 +2372,28 @@
               type: "button",
               text: "Edit",
               onClick: () => openReviewEditorModal(item)
-            }),
-            el("button", {
-              className: "btn btn-ghost btn-sm",
-              type: "button",
-              text: item.published ? "Hide" : "Publish",
-              onClick: async () => {
-                await mutateTable(
-                  "PATCH",
-                  "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id),
-                  { published: !item.published },
-                  { module: "TESTIMONIALS", action: "UPDATE", targetId: item.id, summary: (item.published ? "Hid" : "Published") + " review from " + (item.attribution_role || "Client") }
-                );
-                showToast(item.published ? "Review hidden from app." : "Review published to app.");
-                await refreshAllData(false);
-              }
-            }),
+            })
+          );
+          if (item.published) {
+            actions.push(
+              el("button", {
+                className: "btn btn-ghost btn-sm",
+                type: "button",
+                text: "Hide",
+                onClick: async () => {
+                  await mutateTable(
+                    "PATCH",
+                    "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id),
+                    { published: false },
+                    { module: "TESTIMONIALS", action: "UPDATE", targetId: item.id, summary: "Hid review from " + (item.attribution_role || "Client") }
+                  );
+                  showToast("Review hidden from app.");
+                  await refreshAllData(false);
+                }
+              })
+            );
+          }
+          actions.push(
             el("button", {
               className: "btn btn-danger btn-sm",
               type: "button",
@@ -2383,7 +2413,7 @@
                   }
                 )
             })
-          ];
+          );
           cardNodes.push(el("div", { className: "record-actions" }, actions));
         }
 

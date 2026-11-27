@@ -93,9 +93,7 @@ fun AtelierScreen(
             "Our Expertise" to "our_expertise",
             "Our Portfolio" to "our_portfolio",
             "Careers" to "careers",
-            "Contact Us" to "contact_us",
-            "My Enquiries" to "client_login",
-            "Job Seeker Profile & CV" to "job_seeker_login"
+            "Contact Us" to "contact_us"
         )
     }
 
@@ -124,7 +122,7 @@ fun AtelierScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "ALL PAGES & PORTALS",
+                        text = "ALL PAGES",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = MilaChampagneGold,
                             letterSpacing = 1.6.sp
@@ -247,7 +245,6 @@ fun AtelierScreen(
                 HomeRecruitmentSection(
                     openRoles = openRoles,
                     onBrowseCareers = { onNavigateRoute("careers") },
-                    onJobSeekerPortal = { onNavigateRoute("job_seeker_login") },
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
             }

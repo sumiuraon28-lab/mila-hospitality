@@ -42,7 +42,6 @@ CREATE POLICY testimonials_public_read ON public.testimonials
   FOR SELECT TO anon, authenticated
   USING (
     published = true
-    OR reviewer_user_id = auth.uid()
     OR public.is_admin_with_role(ARRAY['SUPER_ADMIN', 'CONTENT_ADMIN', 'REPORTING_ADMIN'])
   );
 
@@ -52,7 +51,7 @@ CREATE POLICY testimonials_app_user_insert ON public.testimonials
   WITH CHECK (
     reviewer_user_id = auth.uid()
     AND source = 'APP_USER'
-    AND published = true
+    AND published = false
     AND admin_reply = ''
     AND admin_replied_by = ''
     AND admin_replied_at IS NULL
