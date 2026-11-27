@@ -514,7 +514,7 @@ class SupabaseDatabaseClient(
 
     suspend fun fetchPublishedWebsiteContent(): Result<List<SitePageContent>> = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext Result.success(emptyList())
-        executeGetArray("/rest/v1/website_content?published=eq.true&order=page_key.asc", null)
+        executeGetArray("/rest/v1/website_content?published=eq.true&order=updated_at.desc", null)
             .map { arr ->
                 List(arr.length()) { idx ->
                     val o = arr.getJSONObject(idx)
@@ -531,6 +531,29 @@ class SupabaseDatabaseClient(
                         ctaLabel = o.optString("cta_label", "Explore Services"),
                         published = o.optBoolean("published", true)
                     )
+                }
+            }
+    }
+
+    suspend fun fetchPublishedBanners(): Result<List<PromoBanner>> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext Result.success(emptyList())
+        executeGetArray("/rest/v1/website_content?page_key=like.banner_*&published=eq.true&order=updated_at.desc", null)
+            .map { arr ->
+                List(arr.length()) { idx ->
+                    val o = arr.getJSONObject(idx)
+                    SitePageContent(
+                        id = o.optString("id"),
+                        pageKey = o.optString("page_key"),
+                        pageTitle = o.optString("page_title"),
+                        eyebrow = o.optString("eyebrow"),
+                        headline = o.optString("headline"),
+                        subheadline = o.optString("subheadline"),
+                        bodyCopy = o.optString("body_copy"),
+                        heroImageKey = o.optString("hero_image_key", "theme:gold|popup:off|action:contact_us"),
+                        heroImageUrl = o.optString("hero_image_url").takeIf { it.isNotBlank() && it != "null" },
+                        ctaLabel = o.optString("cta_label", "Explore Details"),
+                        published = o.optBoolean("published", true)
+                    ).toPromoBanner()
                 }
             }
     }

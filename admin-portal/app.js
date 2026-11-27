@@ -140,6 +140,7 @@
     { id: "cvs", label: "CV Database & Downloads", group: "Recruitment & Talent", roles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN"] },
     { id: "applications", label: "Applications & Hiring Status", group: "Recruitment & Talent", roles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN"] },
     { id: "notifications", label: "Candidate Notifications", group: "Recruitment & Talent", roles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN"] },
+    { id: "banners", label: "Top Banner & Popup Alerts", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "services", label: "Services", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "portfolio", label: "Portfolio Projects", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "testimonials", label: "Testimonials", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
@@ -557,7 +558,7 @@
         tasks.push(safeFetchList("/rest/v1/portfolio_projects?order=sort_order.asc").then((r) => (state.data.portfolio = r)));
         tasks.push(safeFetchList("/rest/v1/testimonials?order=sort_order.asc").then((r) => (state.data.testimonials = r)));
         tasks.push(safeFetchList("/rest/v1/team_members?order=sort_order.asc").then((r) => (state.data.team = r)));
-        tasks.push(safeFetchList("/rest/v1/website_content?order=page_key.asc").then((r) => (state.data.pages = r)));
+        tasks.push(safeFetchList("/rest/v1/website_content?order=updated_at.desc").then((r) => (state.data.pages = r)));
       }
       await Promise.all(tasks);
 
@@ -790,11 +791,12 @@
       case "cvs": return d.candidates.filter((c) => c.cv_file_name && c.cv_storage_path).length;
       case "applications": return d.applications.length;
       case "notifications": return d.notifications.length;
+      case "banners": return getPromoBanners().length;
       case "services": return d.services.length;
       case "portfolio": return d.portfolio.length;
       case "testimonials": return d.testimonials.length;
       case "team": return d.team.length;
-      case "pages": return d.pages.length;
+      case "pages": return (d.pages || []).filter((p) => !isPromoBannerRow(p)).length;
       case "admins": return d.admins.length;
       case "logs": return d.logs.length;
       default: return null;
@@ -884,33 +886,47 @@
     const d = state.data;
     const cvCount = d.candidates.filter((c) => c.cv_file_name && c.cv_storage_path).length;
     const canManageJobs = canWrite("vacancies");
-    const postJobHeaderBtn = canManageJobs
-      ? el("button", {
-          className: "btn btn-gold",
-          type: "button",
-          text: "+ Post New Job",
-          onClick: () => openVacancyModal(null)
-        })
+    const canManageBanners = canWrite("banners");
+    const promoBanners = getPromoBanners();
+    const headerActions = (canManageJobs || canManageBanners)
+      ? el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" }, [
+          canManageBanners
+            ? el("button", {
+                className: "btn btn-gold",
+                type: "button",
+                text: "+ Create / Upload Banner",
+                onClick: () => openBannerModal(null)
+              })
+            : null,
+          canManageJobs
+            ? el("button", {
+                className: "btn btn-outline",
+                type: "button",
+                text: "+ Post New Job",
+                onClick: () => openVacancyModal(null)
+              })
+            : null
+        ])
       : null;
 
     container.appendChild(
       renderModuleHeader(
         "Executive Command Overview",
-        "Live snapshot across MILA Hospitality clients, enquiries, admin-only job postings, talent dossiers, CVs, and audit history.",
-        postJobHeaderBtn
+        "Live snapshot across MILA Hospitality users, top promotional banners & popups, enquiries, admin-only job postings, talent dossiers, and CVs.",
+        headerActions
       )
     );
 
     const appUsers = buildAppUsersDirectory();
     const kpis = [
       { label: "Logged-In App Users", value: appUsers.length, mod: "users" },
+      { label: "Top Banners & Popups", value: promoBanners.filter((b) => b.published).length + " / " + promoBanners.length, mod: "banners" },
       { label: "Service Enquiries", value: d.enquiries.length, mod: "enquiries" },
       { label: "Open Job Vacancies", value: d.vacancies.filter((v) => v.published).length + " / " + d.vacancies.length, mod: "vacancies" },
       { label: "Candidate Profiles", value: d.candidates.length, mod: "candidates" },
       { label: "Downloadable CVs", value: cvCount, mod: "cvs" },
       { label: "Job Applications", value: d.applications.length, mod: "applications" },
-      { label: "Published Services", value: d.services.filter((s) => s.published).length, mod: "services" },
-      { label: "Audit Trail Entries", value: d.logs.length, mod: "logs" }
+      { label: "Published Services", value: d.services.filter((s) => s.published).length, mod: "services" }
     ];
 
     const grid = el("div", { className: "kpi-grid" });
@@ -981,6 +997,59 @@
         });
       }
       container.appendChild(usersList);
+    }
+
+    if (["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"].includes(state.admin.role)) {
+      const bannerActions = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" }, [
+        canManageBanners
+          ? el("button", {
+              className: "btn btn-gold btn-sm",
+              type: "button",
+              text: "+ Create / Upload Banner",
+              onClick: () => openBannerModal(null)
+            })
+          : null,
+        el("button", {
+          className: "btn btn-outline btn-sm",
+          type: "button",
+          text: "Manage All Banners (" + promoBanners.length + ")",
+          onClick: () => {
+            state.activeModule = "banners";
+            state.searchQuery = "";
+            state.statusFilter = "ALL";
+            renderSidebar();
+            renderActiveModule();
+          }
+        })
+      ]);
+
+      container.appendChild(
+        el("div", { className: "module-header", style: "margin-top:16px;margin-bottom:10px;" }, [
+          el("div", null, [
+            el("h3", { className: "serif", text: "Top Home Banner & Popup Alerts" }),
+            el("p", {
+              className: "record-small",
+              text: "Design or upload ads, new opening alerts, and upcoming project banners shown at the top of the app Home screen."
+            })
+          ]),
+          bannerActions
+        ])
+      );
+
+      const bannerList = el("div", { className: "records-list", style: "margin-bottom:18px;" });
+      if (!promoBanners.length) {
+        bannerList.appendChild(
+          el("div", {
+            className: "empty-state",
+            text: "No top banner posted yet. Tap '+ Create / Upload Banner' to post a new opening alert, ad, or upcoming project."
+          })
+        );
+      } else {
+        promoBanners.slice(0, 3).forEach((b) => {
+          bannerList.appendChild(buildBannerCard(b, canManageBanners));
+        });
+      }
+      container.appendChild(bannerList);
     }
 
     if (["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"].includes(state.admin.role)) {
@@ -2452,6 +2521,535 @@
     container.appendChild(list);
   }
 
+  // =========================================================================
+  // TOP HOME BANNER & POPUP ALERTS (DESIGNER + IMAGE UPLOADER)
+  // Stored cleanly in public.website_content with page_key prefix "banner_"
+  // =========================================================================
+
+  const BANNER_TAG_PRESETS = [
+    "NEW OPENING ALERT",
+    "UPCOMING PROJECT",
+    "FEATURED AD",
+    "SPECIAL ANNOUNCEMENT",
+    "URGENT HIRING",
+    "EXCLUSIVE OFFER"
+  ];
+
+  const BANNER_THEMES = [
+    { key: "gold", label: "Champagne Gold (Luxury)", accent: "#D4AF7A", bg: "linear-gradient(135deg, #2B2418, #141715)" },
+    { key: "emerald", label: "Emerald Launch", accent: "#4CAF7D", bg: "linear-gradient(135deg, #122720, #111614)" },
+    { key: "obsidian", label: "Royal Obsidian", accent: "#E3C796", bg: "linear-gradient(135deg, #1E2228, #0E1110)" },
+    { key: "terracotta", label: "Terracotta Spotlight", accent: "#D97B66", bg: "linear-gradient(135deg, #2C1B17, #151312)" }
+  ];
+
+  const BANNER_ACTIONS = [
+    { key: "contact_us", label: "Open Service Enquiry Form" },
+    { key: "our_services", label: "Go to Our Services" },
+    { key: "careers", label: "Go to Careers / Jobs" },
+    { key: "our_portfolio", label: "Go to Our Portfolio" },
+    { key: "popup_only", label: "Show Popup Details Only" }
+  ];
+
+  function isPromoBannerRow(row) {
+    return Boolean(row && String(row.page_key || "").toLowerCase().startsWith("banner_"));
+  }
+
+  function getPromoBanners() {
+    return (state.data.pages || [])
+      .filter(isPromoBannerRow)
+      .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+  }
+
+  function parseBannerConfig(heroImageKey) {
+    const raw = String(heroImageKey || "");
+    const parts = {};
+    raw.split("|").forEach((seg) => {
+      const idx = seg.indexOf(":");
+      if (idx > 0) {
+        parts[seg.slice(0, idx).trim().toLowerCase()] = seg.slice(idx + 1).trim();
+      }
+    });
+    return {
+      theme: parts.theme || "gold",
+      showPopup: String(parts.popup || "").toLowerCase() === "on",
+      actionRoute: parts.action || "contact_us"
+    };
+  }
+
+  function serializeBannerConfig(theme, showPopup, actionRoute) {
+    return "theme:" + (theme || "gold") + "|popup:" + (showPopup ? "on" : "off") + "|action:" + (actionRoute || "contact_us");
+  }
+
+  function bannerThemeStyle(themeKey) {
+    return BANNER_THEMES.find((t) => t.key === themeKey) || BANNER_THEMES[0];
+  }
+
+  function compressBannerImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Could not read selected image file."));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("Selected file is not a valid image."));
+        img.onload = () => {
+          const maxWidth = 1080;
+          const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+          const targetW = Math.max(1, Math.round(img.width * scale));
+          const targetH = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+          resolve(dataUrl);
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function buildBannerCard(banner, canManage) {
+    const cfg = parseBannerConfig(banner.hero_image_key);
+    const theme = bannerThemeStyle(cfg.theme);
+    const actionObj = BANNER_ACTIONS.find((a) => a.key === cfg.actionRoute) || BANNER_ACTIONS[0];
+
+    const actions = [];
+    if (canManage) {
+      actions.push(
+        el("button", {
+          className: "btn btn-outline btn-sm",
+          type: "button",
+          text: "Edit Banner",
+          onClick: () => openBannerModal(banner)
+        })
+      );
+      actions.push(
+        el("button", {
+          className: "btn btn-outline btn-sm",
+          type: "button",
+          text: banner.published ? "Hide Banner" : "Publish Live",
+          onClick: async () => {
+            try {
+              const nextPub = !banner.published;
+              await supabaseRequest("/rest/v1/website_content?id=eq." + encodeURIComponent(banner.id), {
+                method: "PATCH",
+                body: { published: nextPub }
+              });
+              await logAudit("WEBSITE_CONTENT_MANAGEMENT", nextPub ? "PUBLISH_BANNER" : "HIDE_BANNER", banner.id, (nextPub ? "Published" : "Hid") + " top banner: " + (banner.headline || banner.page_title));
+              showToast(nextPub ? "Banner is now live on the app Home screen." : "Banner hidden from users.");
+              await refreshAllData(false);
+            } catch (err) {
+              showToast(err.message || "Could not update banner status.");
+            }
+          }
+        })
+      );
+      actions.push(
+        el("button", {
+          className: "btn btn-danger btn-sm",
+          type: "button",
+          text: "Delete",
+          onClick: async () => {
+            if (!window.confirm("Delete banner '" + (banner.headline || banner.page_title || "Banner") + "' permanently?")) return;
+            try {
+              await supabaseRequest("/rest/v1/website_content?id=eq." + encodeURIComponent(banner.id), { method: "DELETE" });
+              await logAudit("WEBSITE_CONTENT_MANAGEMENT", "DELETE_BANNER", banner.id, "Deleted top banner: " + (banner.headline || banner.page_title));
+              showToast("Banner deleted.");
+              await refreshAllData(false);
+            } catch (err) {
+              showToast(err.message || "Failed to delete banner.");
+            }
+          }
+        })
+      );
+    }
+
+    const previewImg = banner.hero_image_url
+      ? el("img", {
+          src: banner.hero_image_url,
+          alt: banner.headline || "Banner preview",
+          style: "width:100%;max-height:170px;object-fit:cover;border-radius:10px;border:1px solid rgba(212,175,122,0.35);margin-bottom:8px;"
+        })
+      : null;
+
+    return el("div", { className: "record-card", style: "background:" + theme.bg + ";border-color:" + theme.accent + "55;" }, [
+      previewImg,
+      el("div", { className: "record-top" }, [
+        pill(banner.page_title || "ANNOUNCEMENT", "gold"),
+        pill(banner.published ? "LIVE IN APP" : "HIDDEN DRAFT", banner.published ? "emerald" : "muted"),
+        cfg.showPopup ? pill("AUTO-POPUP ON OPEN", "gold") : null
+      ]),
+      banner.eyebrow ? el("div", { className: "record-small", style: "color:" + theme.accent + ";font-weight:600;letter-spacing:0.8px;", text: banner.eyebrow.toUpperCase() }) : null,
+      el("div", { className: "record-title", text: banner.headline || "Untitled Banner" }),
+      banner.subheadline ? el("div", { className: "record-meta", text: banner.subheadline }) : null,
+      banner.body_copy && banner.body_copy !== banner.subheadline
+        ? el("div", { className: "record-small", text: "Popup Details: " + banner.body_copy.slice(0, 140) + (banner.body_copy.length > 140 ? "..." : "") })
+        : null,
+      el("div", {
+        className: "record-small",
+        text: "Button: '" + (banner.cta_label || "Explore Details") + "' → " + actionObj.label + (banner.updated_at ? " • Updated: " + formatDateTime(banner.updated_at) : "")
+      }),
+      actions.length ? el("div", { className: "record-actions" }, actions) : null
+    ]);
+  }
+
+  function openBannerModal(existing) {
+    const isEdit = Boolean(existing);
+    const existingCfg = parseBannerConfig(existing ? existing.hero_image_key : "");
+
+    let imageDataUrl = existing && existing.hero_image_url ? String(existing.hero_image_url) : "";
+    let selectedTag = existing && existing.page_title ? existing.page_title : "NEW OPENING ALERT";
+    let selectedTheme = existingCfg.theme || "gold";
+    let selectedAction = existingCfg.actionRoute || "contact_us";
+    let autoPopupEnabled = existing ? existingCfg.showPopup : true;
+    let isPublished = existing ? Boolean(existing.published) : true;
+
+    const tagSelect = el(
+      "select",
+      { className: "filter-select", style: "width:100%;" },
+      BANNER_TAG_PRESETS.map((t) => el("option", { value: t, text: t }))
+    );
+    if (BANNER_TAG_PRESETS.includes(selectedTag)) {
+      tagSelect.value = selectedTag;
+    }
+
+    const customTagInput = el("input", {
+      type: "text",
+      placeholder: "Or type custom tag (e.g. GRAND LAUNCH, SPECIAL AD)",
+      value: selectedTag
+    });
+    tagSelect.addEventListener("change", () => {
+      customTagInput.value = tagSelect.value;
+      updateLivePreview();
+    });
+    customTagInput.addEventListener("input", () => updateLivePreview());
+
+    const eyebrowInput = el("input", {
+      type: "text",
+      placeholder: "e.g. GOA • OPENING Q3 2027",
+      value: existing ? (existing.eyebrow || "") : ""
+    });
+    const headlineInput = el("input", {
+      type: "text",
+      placeholder: "e.g. Upcoming Luxury Resort Pre-Opening — North Goa",
+      value: existing ? (existing.headline || "") : ""
+    });
+    const subheadlineInput = el("input", {
+      type: "text",
+      placeholder: "Short 1-line tagline shown on the top banner",
+      value: existing ? (existing.subheadline || "") : ""
+    });
+    const detailsInput = el("textarea", {
+      rows: "4",
+      placeholder: "Full announcement, project highlights, dates, or ad details shown when people tap the banner or see the popup..."
+    });
+    detailsInput.value = existing ? (existing.body_copy || "") : "";
+
+    const ctaInput = el("input", {
+      type: "text",
+      placeholder: "e.g. Explore Project / Enquire Now / Apply Now",
+      value: existing ? (existing.cta_label || "Explore Project") : "Explore Project"
+    });
+
+    const themeSelect = el(
+      "select",
+      { className: "filter-select", style: "width:100%;" },
+      BANNER_THEMES.map((t) => el("option", { value: t.key, text: t.label }))
+    );
+    themeSelect.value = selectedTheme;
+    themeSelect.addEventListener("change", () => {
+      selectedTheme = themeSelect.value;
+      updateLivePreview();
+    });
+
+    const actionSelect = el(
+      "select",
+      { className: "filter-select", style: "width:100%;" },
+      BANNER_ACTIONS.map((a) => el("option", { value: a.key, text: a.label }))
+    );
+    actionSelect.value = selectedAction;
+    actionSelect.addEventListener("change", () => {
+      selectedAction = actionSelect.value;
+    });
+
+    const imageStatusText = el("div", {
+      className: "record-small",
+      text: imageDataUrl ? "Custom banner image attached." : "Optional: Upload any poster, ad graphic, or project photo from your phone/computer."
+    });
+
+    const imageUrlInput = el("input", {
+      type: "url",
+      placeholder: "Or paste an image URL (https://...)",
+      value: imageDataUrl.startsWith("http") ? imageDataUrl : ""
+    });
+    imageUrlInput.addEventListener("input", () => {
+      const val = imageUrlInput.value.trim();
+      if (val) {
+        imageDataUrl = val;
+        imageStatusText.textContent = "Using external image URL.";
+      } else if (imageDataUrl.startsWith("http")) {
+        imageDataUrl = "";
+        imageStatusText.textContent = "No image attached (using luxury designed banner).";
+      }
+      updateLivePreview();
+    });
+
+    const fileInput = el("input", {
+      type: "file",
+      accept: "image/*",
+      style: "width:100%;padding:8px;border:1px dashed rgba(212,175,122,0.5);border-radius:8px;background:rgba(0,0,0,0.2);color:#F3EFE6;"
+    });
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      imageStatusText.textContent = "Optimizing image for mobile app...";
+      try {
+        imageDataUrl = await compressBannerImageFile(file);
+        imageUrlInput.value = "";
+        const kb = Math.round((imageDataUrl.length * 0.75) / 1024);
+        imageStatusText.textContent = "Image uploaded & optimized (" + kb + " KB). Ready to post!";
+        updateLivePreview();
+      } catch (err) {
+        imageStatusText.textContent = err.message || "Image upload failed.";
+      }
+    });
+
+    const removeImageBtn = el("button", {
+      className: "btn btn-outline btn-sm",
+      type: "button",
+      text: "Remove Image",
+      onClick: () => {
+        imageDataUrl = "";
+        imageUrlInput.value = "";
+        fileInput.value = "";
+        imageStatusText.textContent = "Image removed. Using MILA luxury designed banner.";
+        updateLivePreview();
+      }
+    });
+
+    const popupCheck = el("input", { type: "checkbox", checked: autoPopupEnabled });
+    popupCheck.addEventListener("change", () => {
+      autoPopupEnabled = popupCheck.checked;
+      updateLivePreview();
+    });
+
+    const pubCheck = el("input", { type: "checkbox", checked: isPublished });
+    pubCheck.addEventListener("change", () => {
+      isPublished = pubCheck.checked;
+    });
+
+    const previewBox = el("div", {
+      style: "border-radius:12px;overflow:hidden;border:1px solid rgba(212,175,122,0.6);margin-bottom:12px;"
+    });
+
+    function updateLivePreview() {
+      clearNode(previewBox);
+      const t = bannerThemeStyle(themeSelect.value);
+      previewBox.style.background = t.bg;
+      previewBox.style.borderColor = t.accent;
+      if (imageDataUrl) {
+        previewBox.appendChild(
+          el("img", {
+            src: imageDataUrl,
+            alt: "Live preview",
+            style: "width:100%;max-height:150px;object-fit:cover;display:block;"
+          })
+        );
+      }
+      previewBox.appendChild(
+        el("div", { style: "padding:12px;display:flex;flex-direction:column;gap:5px;" }, [
+          el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;" }, [
+            el("span", {
+              style: "font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 8px;border-radius:999px;border:1px solid " + t.accent + ";color:" + t.accent + ";",
+              text: (customTagInput.value.trim() || "ANNOUNCEMENT").toUpperCase()
+            }),
+            popupCheck.checked
+              ? el("span", { style: "font-size:10px;color:#F3EFE6;opacity:0.85;", text: "Auto-Popup Enabled" })
+              : null
+          ]),
+          eyebrowInput.value.trim()
+            ? el("div", { style: "font-size:11px;color:" + t.accent + ";letter-spacing:1px;font-weight:600;", text: eyebrowInput.value.trim().toUpperCase() })
+            : null,
+          el("div", { style: "font-size:16px;font-weight:700;color:#F3EFE6;", text: headlineInput.value.trim() || "Your Banner Headline Appears Here" }),
+          subheadlineInput.value.trim()
+            ? el("div", { style: "font-size:12px;color:#D6D0C4;", text: subheadlineInput.value.trim() })
+            : null,
+          el("div", { style: "margin-top:4px;display:flex;justify-content:flex-end;" }, [
+            el("span", {
+              style: "font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;background:" + t.accent + ";color:#121614;",
+              text: (ctaInput.value.trim() || "Explore Project") + " →"
+            })
+          ])
+        ])
+      );
+    }
+
+    eyebrowInput.addEventListener("input", updateLivePreview);
+    headlineInput.addEventListener("input", updateLivePreview);
+    subheadlineInput.addEventListener("input", updateLivePreview);
+    ctaInput.addEventListener("input", updateLivePreview);
+    updateLivePreview();
+
+    const bodyNodes = [
+      el("div", { className: "eyebrow", style: "margin-bottom:6px;", text: "LIVE APP BANNER PREVIEW (TOP OF HOME SCREEN)" }),
+      previewBox,
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Upload Banner Poster / Ad Image (Phone Gallery or Computer)" }),
+        fileInput,
+        el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;" }, [
+          imageStatusText,
+          removeImageBtn
+        ])
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Or Paste Image URL (Optional)" }),
+        imageUrlInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Alert Type Preset" }),
+        tagSelect
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Banner Tag Label *" }),
+        customTagInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Small Badge (City / Launch Date)" }),
+        eyebrowInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Banner Headline *" }),
+        headlineInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Short Subtitle (Shown on Banner)" }),
+        subheadlineInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Full Upcoming Project / Ad Details (Shown in Popup)" }),
+        detailsInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Banner Color Design Theme" }),
+        themeSelect
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "Button Text" }),
+        ctaInput
+      ]),
+      el("div", { className: "field-group" }, [
+        el("label", { text: "When User Taps Button" }),
+        actionSelect
+      ]),
+      el("label", { style: "display:flex;gap:8px;align-items:center;margin:10px 0;" }, [
+        popupCheck,
+        el("span", { text: "Show as a Popup Alert when users open the app (recommended for big launches)" })
+      ]),
+      el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0;" }, [
+        pubCheck,
+        el("span", { text: "Published (Show live at the top of the app Home screen right now)" })
+      ])
+    ];
+
+    const saveBtn = el("button", {
+      className: "btn btn-gold",
+      type: "button",
+      text: isEdit ? "Save Banner Changes" : "Post Live Banner",
+      onClick: async () => {
+        const headline = headlineInput.value.trim();
+        const tagLabel = customTagInput.value.trim() || "ANNOUNCEMENT";
+        if (!headline) {
+          showToast("Please enter a Banner Headline.");
+          return;
+        }
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+        try {
+          const payload = {
+            page_title: tagLabel,
+            eyebrow: eyebrowInput.value.trim(),
+            headline: headline,
+            subheadline: subheadlineInput.value.trim(),
+            body_copy: detailsInput.value.trim() || subheadlineInput.value.trim(),
+            hero_image_key: serializeBannerConfig(themeSelect.value, popupCheck.checked, actionSelect.value),
+            hero_image_url: imageDataUrl || null,
+            cta_label: ctaInput.value.trim() || "Explore Details",
+            published: pubCheck.checked,
+            updated_by: state.user ? state.user.id : null
+          };
+          if (isEdit) {
+            await supabaseRequest("/rest/v1/website_content?id=eq." + encodeURIComponent(existing.id), {
+              method: "PATCH",
+              body: payload
+            });
+            await logAudit("WEBSITE_CONTENT_MANAGEMENT", "UPDATE_BANNER", existing.id, "Updated top banner: " + headline);
+            showToast("Banner updated live!");
+          } else {
+            const slug = headline.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "promo";
+            payload.page_key = "banner_" + slug + "_" + Date.now();
+            await supabaseRequest("/rest/v1/website_content", {
+              method: "POST",
+              body: payload
+            });
+            await logAudit("WEBSITE_CONTENT_MANAGEMENT", "CREATE_BANNER", payload.page_key, "Posted top banner: " + headline);
+            showToast("Top banner posted live to the MILA app!");
+          }
+          closeModal();
+          await refreshAllData(false);
+        } catch (err) {
+          showToast(err.message || "Could not save banner.");
+          saveBtn.disabled = false;
+          saveBtn.textContent = isEdit ? "Save Banner Changes" : "Post Live Banner";
+        }
+      }
+    });
+
+    openModal(
+      isEdit ? "Edit Top Banner & Popup" : "Create / Upload Top Banner & Popup",
+      bodyNodes,
+      [
+        el("button", { className: "btn btn-outline", type: "button", text: "Cancel", onClick: closeModal }),
+        saveBtn
+      ]
+    );
+  }
+
+  function renderPromoBanners(container) {
+    const writable = canWrite("banners");
+    const banners = getPromoBanners();
+    const addBtn = writable
+      ? el("button", {
+          className: "btn btn-gold",
+          type: "button",
+          text: "+ Create / Upload Banner",
+          onClick: () => openBannerModal(null)
+        })
+      : null;
+
+    container.appendChild(
+      renderModuleHeader(
+        "Top Banner & Popup Alerts",
+        "Upload ads, opening alerts, or upcoming project posters. Active banners appear right at the top of the app Home screen and open a rich popup on tap (or automatically on launch).",
+        addBtn
+      )
+    );
+
+    const list = el("div", { className: "records-list" });
+    if (!banners.length) {
+      list.appendChild(
+        el("div", {
+          className: "empty-state",
+          text: "No banners created yet. Tap '+ Create / Upload Banner' above to design a luxury alert or upload your own poster image."
+        })
+      );
+    } else {
+      banners.forEach((b) => list.appendChild(buildBannerCard(b, writable)));
+    }
+    container.appendChild(list);
+  }
+
   function renderActiveModule() {
     const mod = MODULES.find((m) => m.id === state.activeModule) || MODULES[0];
     document.getElementById("topbarModuleTitle").textContent = mod.label;
@@ -2468,6 +3066,7 @@
       case "cvs": renderCvDatabase(container); break;
       case "applications": renderApplications(container); break;
       case "notifications": renderNotifications(container); break;
+      case "banners": renderPromoBanners(container); break;
       case "services":
         renderCmsTable(container, {
           moduleId: "services",
@@ -2584,7 +3183,7 @@
           subtitle: "Edit headlines, copy, and call-to-action labels",
           singular: "Page Content",
           addLabel: "Add Page",
-          items: state.data.pages,
+          items: (state.data.pages || []).filter((p) => !isPromoBannerRow(p)),
           getTitle: (p) => (p.page_title || "") + " (" + (p.page_key || "") + ")",
           getBadge: (p) => p.eyebrow || "",
           getBody: (p) => p.headline || p.body_copy || "",

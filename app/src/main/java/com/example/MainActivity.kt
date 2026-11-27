@@ -92,6 +92,7 @@ import com.example.data.EnquiryConfirmation
 import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
 import com.example.data.MilaRepository
+import com.example.data.PromoBanner
 import com.example.data.PublicCmsRepository
 import com.example.data.ServiceCatalogRepository
 import com.example.data.Testimonial
@@ -252,6 +253,7 @@ fun MilaAppRoot() {
     val isRefreshingVacancies by catalogViewModel.isRefreshingVacancies.collectAsStateWithLifecycle()
     val portfolio by catalogViewModel.portfolio.collectAsStateWithLifecycle()
     val testimonials by catalogViewModel.testimonials.collectAsStateWithLifecycle()
+    val promoBanners by catalogViewModel.promoBanners.collectAsStateWithLifecycle()
 
     val isAuthenticated = currentUser != null || supabaseSession != null || supabaseCandidateSession != null
 
@@ -325,6 +327,10 @@ fun MilaAppRoot() {
                     onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                     portfolio = portfolio,
                     testimonials = testimonials,
+                    promoBanners = promoBanners,
+                    onRefreshBanners = { catalogViewModel.refreshBanners() },
+                    shouldShowAutoPopup = { id -> catalogViewModel.shouldShowAutoPopup(id) },
+                    onAutoPopupShown = { id -> catalogViewModel.markAutoPopupShown(id) },
                     onSignOut = handleMemberSignOut,
                     mandatesViewModel = mandatesViewModel
                 )
@@ -342,6 +348,10 @@ fun MilaAppRoot() {
                 onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                 portfolio = portfolio,
                 testimonials = testimonials,
+                promoBanners = promoBanners,
+                onRefreshBanners = { catalogViewModel.refreshBanners() },
+                shouldShowAutoPopup = { id -> catalogViewModel.shouldShowAutoPopup(id) },
+                onAutoPopupShown = { id -> catalogViewModel.markAutoPopupShown(id) },
                 onSignOut = handleMemberSignOut,
                 mandatesViewModel = null
             )
@@ -363,6 +373,10 @@ private fun MilaAppShell(
     onRefreshVacancies: () -> Unit,
     portfolio: List<CaseStudy>,
     testimonials: List<Testimonial>,
+    promoBanners: List<PromoBanner>,
+    onRefreshBanners: () -> Unit,
+    shouldShowAutoPopup: (String) -> Boolean,
+    onAutoPopupShown: (String) -> Unit,
     onSignOut: () -> Unit,
     mandatesViewModel: MandatesViewModel?
 ) {
@@ -587,11 +601,17 @@ private fun MilaAppShell(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             composable(ROUTE_HOME) {
+                                LaunchedEffect(Unit) {
+                                    onRefreshBanners()
+                                }
                                 AtelierScreen(
                                     services = services,
                                     openRoles = vacancies,
                                     portfolioItems = portfolio,
                                     testimonials = testimonials,
+                                    promoBanners = promoBanners,
+                                    shouldShowAutoPopup = shouldShowAutoPopup,
+                                    onAutoPopupShown = onAutoPopupShown,
                                     onOpenServiceDetail = { service ->
                                         navigateToRoute("$ROUTE_SERVICE_DETAIL_BASE/${service.slug}")
                                     },

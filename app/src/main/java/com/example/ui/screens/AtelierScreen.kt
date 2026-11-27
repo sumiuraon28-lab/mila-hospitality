@@ -27,6 +27,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import com.example.data.ConsultancyService
 import com.example.data.ConsultationServiceType
 import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
+import com.example.data.PromoBanner
 import com.example.data.Testimonial
 import com.example.ui.components.GoldOutlineButton
 import com.example.ui.components.LuxuryMetricTile
@@ -61,9 +63,21 @@ fun AtelierScreen(
     openRoles: List<HospitalityRole> = MilaCatalog.openRoles,
     portfolioItems: List<CaseStudy> = MilaCatalog.caseStudies,
     testimonials: List<Testimonial> = MilaCatalog.testimonials,
+    promoBanners: List<PromoBanner> = emptyList(),
+    shouldShowAutoPopup: (String) -> Boolean = { false },
+    onAutoPopupShown: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedCaseStudy by remember { mutableStateOf<CaseStudy?>(null) }
+    var activePopupBanner by remember { mutableStateOf<PromoBanner?>(null) }
+
+    LaunchedEffect(promoBanners) {
+        val autoBanner = promoBanners.firstOrNull { it.showAutoPopup && shouldShowAutoPopup(it.id) }
+        if (autoBanner != null && activePopupBanner == null) {
+            onAutoPopupShown(autoBanner.id)
+            activePopupBanner = autoBanner
+        }
+    }
 
     val quickDirectory = remember {
         listOf(
@@ -92,6 +106,16 @@ fun AtelierScreen(
                     onExploreServicesClick = { onNavigateRoute("our_services") },
                     onExploreCareersClick = { onNavigateRoute("careers") }
                 )
+            }
+
+            if (promoBanners.isNotEmpty()) {
+                item(key = "home_top_promo_banner") {
+                    TopPromoBannerSection(
+                        banners = promoBanners,
+                        onOpenBannerPopup = { banner -> activePopupBanner = banner },
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
             }
 
             item {
@@ -288,15 +312,6 @@ fun AtelierScreen(
             }
 
             item {
-                DedicatedPortalsSection(
-                    isWide = isWide,
-                    onClientLogin = { onNavigateRoute("client_login") },
-                    onJobSeekerLogin = { onNavigateRoute("job_seeker_login") },
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-            }
-
-            item {
                 HomeContactInfoCard(
                     onContactUs = { onNavigateRoute("contact_us") },
                     onIndustries = { onNavigateRoute("industries_we_serve") },
@@ -321,6 +336,24 @@ fun AtelierScreen(
                 }
             )
         }
+    }
+
+    activePopupBanner?.let { banner ->
+        PromoBannerPopupDialog(
+            banner = banner,
+            onDismiss = { activePopupBanner = null },
+            onActionClick = { selected ->
+                activePopupBanner = null
+                when (selected.actionRoute) {
+                    "enquire", "contact_us" -> onOpenConsultation(ConsultationServiceType.HOSPITALITY_PRE_OPENING)
+                    "our_services" -> onNavigateRoute("our_services")
+                    "careers" -> onNavigateRoute("careers")
+                    "our_portfolio" -> onNavigateRoute("our_portfolio")
+                    "our_expertise" -> onNavigateRoute("our_expertise")
+                    else -> Unit
+                }
+            }
+        )
     }
 }
 

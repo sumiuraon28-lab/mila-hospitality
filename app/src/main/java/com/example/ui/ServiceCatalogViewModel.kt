@@ -6,11 +6,14 @@ import com.example.data.CaseStudy
 import com.example.data.ConsultancyService
 import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
+import com.example.data.PromoBanner
 import com.example.data.PublicCmsRepository
 import com.example.data.ServiceCatalogRepository
 import com.example.data.SitePageContent
 import com.example.data.SupabaseDatabaseClient
 import com.example.data.Testimonial
+import com.example.data.isPromoBanner
+import com.example.data.toPromoBanner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,9 +38,21 @@ class ServiceCatalogViewModel(
     private val _supabaseTestimonials = MutableStateFlow<List<Testimonial>>(emptyList())
     private val _websiteContent = MutableStateFlow<List<SitePageContent>>(emptyList())
     val websiteContent: StateFlow<List<SitePageContent>> = _websiteContent.asStateFlow()
+    private val _promoBanners = MutableStateFlow<List<PromoBanner>>(emptyList())
+    val promoBanners: StateFlow<List<PromoBanner>> = _promoBanners.asStateFlow()
+    private val shownAutoPopupIds = mutableSetOf<String>()
 
     init {
         refreshSupabasePublicCatalog()
+    }
+
+    fun shouldShowAutoPopup(bannerId: String): Boolean =
+        bannerId.isNotBlank() && !shownAutoPopupIds.contains(bannerId)
+
+    fun markAutoPopupShown(bannerId: String) {
+        if (bannerId.isNotBlank()) {
+            shownAutoPopupIds.add(bannerId)
+        }
     }
 
     fun refreshSupabasePublicCatalog() {
@@ -52,7 +67,19 @@ class ServiceCatalogViewModel(
             _isRefreshingVacancies.value = false
             supabaseDb.fetchPublishedPortfolio().onSuccess { if (it.isNotEmpty()) _supabasePortfolio.value = it }
             supabaseDb.fetchPublishedTestimonials().onSuccess { if (it.isNotEmpty()) _supabaseTestimonials.value = it }
-            supabaseDb.fetchPublishedWebsiteContent().onSuccess { if (it.isNotEmpty()) _websiteContent.value = it }
+            supabaseDb.fetchPublishedWebsiteContent().onSuccess { list ->
+                _websiteContent.value = list.filterNot { it.isPromoBanner() }
+                _promoBanners.value = list.filter { it.isPromoBanner() }.map { it.toPromoBanner() }
+            }
+        }
+    }
+
+    fun refreshBanners() {
+        if (!supabaseDb.isConfigured()) return
+        viewModelScope.launch {
+            supabaseDb.fetchPublishedBanners().onSuccess { banners ->
+                _promoBanners.value = banners
+            }
         }
     }
 
