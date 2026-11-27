@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.WorkOutline
 import androidx.compose.material3.Card
@@ -44,7 +46,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -87,12 +91,16 @@ fun TalentScreen(
     appliedRoleIds: Set<String>,
     onToggleSaveRole: (HospitalityRole, Boolean) -> Unit,
     onApplyRole: (HospitalityRole) -> Unit,
-    onHireTalentMandate: () -> Unit,
+    onHireTalentMandate: () -> Unit = {},
     onOpenJobSeekerPortal: () -> Unit,
     jobAlertsEnabled: Boolean = false,
     roles: List<HospitalityRole> = MilaCatalog.openRoles,
+    isRefreshing: Boolean = false,
+    onRefreshRoles: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
     var selectedLocation by remember { mutableStateOf("All Locations") }
     var selectedCategory by remember { mutableStateOf(RoleCategory.ALL) }
@@ -118,6 +126,7 @@ fun TalentScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -147,26 +156,45 @@ fun TalentScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "MILA TALENT • CANDIDATE & EMPLOYER ACCESS",
+                            text = "MILA TALENT • JOB SEEKER HUB",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = MilaChampagneGold,
                                 letterSpacing = 1.4.sp
                             )
                         )
-                        if (jobAlertsEnabled) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (jobAlertsEnabled) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.NotificationsActive,
+                                        contentDescription = "Job alerts active",
+                                        tint = MilaChampagneGold,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Alerts On",
+                                        style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold)
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = onRefreshRoles,
+                                enabled = !isRefreshing,
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("talent_refresh_jobs_button")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.NotificationsActive,
-                                    contentDescription = "Job alerts active",
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = "Refresh latest MILA jobs",
                                     tint = MilaChampagneGold,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Alerts On",
-                                    style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -174,28 +202,21 @@ fun TalentScreen(
 
                     GoldFilledButton(
                         text = "I AM LOOKING FOR A JOB",
-                        onClick = onOpenJobSeekerPortal,
+                        onClick = {
+                            scope.launch {
+                                listState.animateScrollToItem(index = 4)
+                            }
+                        },
                         testTag = "talent_iam_looking_for_job_button",
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        GoldOutlineButton(
-                            text = "Candidate Login / CV",
-                            onClick = onOpenJobSeekerPortal,
-                            testTag = "careers_job_seeker_portal_button",
-                            modifier = Modifier.weight(1f)
-                        )
-                        GoldOutlineButton(
-                            text = "Hire Talent",
-                            onClick = onHireTalentMandate,
-                            testTag = "talent_hire_mandate_button",
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    GoldOutlineButton(
+                        text = "Upload CV & Update Experience",
+                        onClick = onOpenJobSeekerPortal,
+                        testTag = "careers_job_seeker_portal_button",
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }
@@ -335,11 +356,15 @@ fun TalentScreen(
                             modifier = Modifier.size(32.dp)
                         )
                         Text(
-                            text = "No matching vacancies",
+                            text = if (roles.isEmpty()) "No open jobs right now" else "No matching vacancies",
                             style = MaterialTheme.typography.titleMedium.copy(color = MilaIvory)
                         )
                         Text(
-                            text = "Try resetting location, department, or experience filters.",
+                            text = if (roles.isEmpty()) {
+                                "New hospitality openings posted by MILA Admin will appear here automatically."
+                            } else {
+                                "Try resetting location, department, or experience filters."
+                            },
                             style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
                         )
                     }

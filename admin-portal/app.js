@@ -120,6 +120,10 @@
     "PRE_OPENING", "EXECUTIVE", "CULINARY", "FNB_SERVICE", "MIXOLOGY", "ROOMS"
   ];
 
+  const CITY_REGIONS = [
+    "Mumbai", "New Delhi NCR", "Bengaluru", "Udaipur & Rajasthan", "Goa", "Hyderabad", "Pan-India"
+  ];
+
   const AVAILABILITIES = [
     "IMMEDIATE", "WITHIN_15_DAYS", "WITHIN_30_DAYS", "WITHIN_60_DAYS", "NOT_ACTIVELY_LOOKING"
   ];
@@ -735,34 +739,116 @@
   function renderOverview(container) {
     const d = state.data;
     const cvCount = d.candidates.filter((c) => c.cv_file_name && c.cv_storage_path).length;
+    const canManageJobs = canWrite("vacancies");
+    const postJobHeaderBtn = canManageJobs
+      ? el("button", {
+          className: "btn btn-gold",
+          type: "button",
+          text: "+ Post New Job",
+          onClick: () => openVacancyModal(null)
+        })
+      : null;
+
     container.appendChild(
       renderModuleHeader(
         "Executive Command Overview",
-        "Live snapshot across MILA Hospitality clients, enquiries, talent dossiers, CVs, and audit history."
+        "Live snapshot across MILA Hospitality clients, enquiries, admin-only job postings, talent dossiers, CVs, and audit history.",
+        postJobHeaderBtn
       )
     );
 
     const kpis = [
-      { label: "Registered Clients", value: d.clients.length },
-      { label: "Service Enquiries", value: d.enquiries.length },
-      { label: "Open Job Vacancies", value: d.vacancies.filter((v) => v.published).length + " / " + d.vacancies.length },
-      { label: "Candidate Profiles", value: d.candidates.length },
-      { label: "Downloadable CVs", value: cvCount },
-      { label: "Job Applications", value: d.applications.length },
-      { label: "Published Services", value: d.services.filter((s) => s.published).length },
-      { label: "Audit Trail Entries", value: d.logs.length }
+      { label: "Registered Clients", value: d.clients.length, mod: "clients" },
+      { label: "Service Enquiries", value: d.enquiries.length, mod: "enquiries" },
+      { label: "Open Job Vacancies", value: d.vacancies.filter((v) => v.published).length + " / " + d.vacancies.length, mod: "vacancies" },
+      { label: "Candidate Profiles", value: d.candidates.length, mod: "candidates" },
+      { label: "Downloadable CVs", value: cvCount, mod: "cvs" },
+      { label: "Job Applications", value: d.applications.length, mod: "applications" },
+      { label: "Published Services", value: d.services.filter((s) => s.published).length, mod: "services" },
+      { label: "Audit Trail Entries", value: d.logs.length, mod: "logs" }
     ];
 
     const grid = el("div", { className: "kpi-grid" });
+    const allowedIds = new Set(allowedModules().map((m) => m.id));
     kpis.forEach((k) => {
+      const clickable = allowedIds.has(k.mod);
       grid.appendChild(
-        el("div", { className: "kpi-card" }, [
-          el("div", { className: "eyebrow", text: k.label }),
-          el("div", { className: "kpi-value", text: k.value })
-        ])
+        el(
+          "div",
+          {
+            className: "kpi-card",
+            style: clickable ? "cursor:pointer;" : "",
+            onClick: clickable
+              ? () => {
+                  state.activeModule = k.mod;
+                  state.searchQuery = "";
+                  state.statusFilter = "ALL";
+                  renderSidebar();
+                  renderActiveModule();
+                }
+              : null
+          },
+          [
+            el("div", { className: "eyebrow", text: k.label }),
+            el("div", { className: "kpi-value", text: k.value })
+          ]
+        )
       );
     });
     container.appendChild(grid);
+
+    if (["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"].includes(state.admin.role)) {
+      const jobsActions = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" }, [
+        canManageJobs
+          ? el("button", {
+              className: "btn btn-gold btn-sm",
+              type: "button",
+              text: "+ Post New Job",
+              onClick: () => openVacancyModal(null)
+            })
+          : null,
+        el("button", {
+          className: "btn btn-outline btn-sm",
+          type: "button",
+          text: "Manage All Jobs (" + d.vacancies.length + ")",
+          onClick: () => {
+            state.activeModule = "vacancies";
+            state.searchQuery = "";
+            state.statusFilter = "ALL";
+            renderSidebar();
+            renderActiveModule();
+          }
+        })
+      ]);
+
+      container.appendChild(
+        el("div", { className: "module-header", style: "margin-top:16px;margin-bottom:10px;" }, [
+          el("div", null, [
+            el("h3", { className: "serif", text: "Job Vacancies (MILA Admin Only)" }),
+            el("p", {
+              className: "record-small",
+              text: "Only MILA Admin can post, edit, publish, or delete jobs. Changes appear live in the Careers tab."
+            })
+          ]),
+          jobsActions
+        ])
+      );
+
+      const jobList = el("div", { className: "records-list", style: "margin-bottom:18px;" });
+      if (!d.vacancies.length) {
+        jobList.appendChild(
+          el("div", {
+            className: "empty-state",
+            text: "No job vacancies posted yet. Tap '+ Post New Job' above to publish your first hospitality role."
+          })
+        );
+      } else {
+        d.vacancies.slice(0, 5).forEach((job) => {
+          jobList.appendChild(buildVacancyCard(job, canManageJobs));
+        });
+      }
+      container.appendChild(jobList);
+    }
 
     if (["SUPER_ADMIN", "CONSULTANT", "REPORTING_ADMIN"].includes(state.admin.role)) {
       const enqHeader = el("div", { className: "module-header", style: "margin-top:16px;margin-bottom:10px;" }, [
@@ -1067,78 +1153,113 @@
     );
   }
 
+  function buildVacancyCard(job, writable) {
+    const actions = [];
+    if (writable) {
+      actions.push(
+        el("button", { className: "btn btn-outline btn-sm", type: "button", text: "Edit Job", onClick: () => openVacancyModal(job) }),
+        el("button", {
+          className: "btn btn-ghost btn-sm",
+          type: "button",
+          text: job.published ? "Unpublish" : "Publish",
+          onClick: async () => {
+            try {
+              await mutateTable(
+                "PATCH",
+                "/rest/v1/job_vacancies?id=eq." + encodeURIComponent(job.id),
+                { published: !job.published },
+                {
+                  module: "JOB_VACANCY_MANAGEMENT",
+                  action: "UPDATE",
+                  targetId: job.id,
+                  summary: (job.published ? "Unpublished " : "Published ") + job.title
+                }
+              );
+              showToast(job.published ? "Job unpublished (hidden from app)." : "Job published live to MILA App.");
+              await refreshAllData(false);
+            } catch (err) {
+              showToast(err.message || "Unable to update job status.");
+            }
+          }
+        }),
+        el("button", {
+          className: "btn btn-danger btn-sm",
+          type: "button",
+          text: "Delete Job",
+          onClick: () =>
+            confirmDelete("Delete Job Vacancy?", "Permanently delete '" + job.title + "' from MILA Talent?", async () => {
+              await mutateTable("DELETE", "/rest/v1/job_vacancies?id=eq." + encodeURIComponent(job.id), null, {
+                module: "JOB_VACANCY_MANAGEMENT",
+                action: "DELETE",
+                targetId: job.id,
+                summary: "Deleted vacancy " + job.title
+              });
+              showToast("Job deleted.");
+            })
+        })
+      );
+    }
+    const when = formatTimestamp(job.created_at);
+    return el("div", { className: "record-card" }, [
+      el("div", { className: "record-top" }, [
+        el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
+          pill(job.published ? "Published Live" : "Draft", job.published ? "emerald" : "muted"),
+          pill((job.category || "PRE_OPENING").replace(/_/g, " "), "gold"),
+          job.is_urgent ? pill("Urgent Mandate", "alert") : null
+        ]),
+        when ? el("span", { className: "record-small", text: when }) : null
+      ]),
+      el("div", { className: "record-title", text: job.title || "" }),
+      el("div", { className: "record-sub", text: (job.property_tier || "") + " • " + (job.location || "") }),
+      el("div", { className: "record-meta", text: (job.compensation || "") + " • " + (job.experience_required || "") }),
+      job.summary ? el("div", { className: "record-small", text: job.summary }) : null,
+      actions.length ? el("div", { className: "record-actions" }, actions) : null
+    ]);
+  }
+
   function renderVacancies(container) {
     const writable = canWrite("vacancies");
     const addBtn = writable
-      ? el("button", { className: "btn btn-gold", type: "button", text: "+ New Vacancy", onClick: () => openVacancyModal(null) })
+      ? el("button", { className: "btn btn-gold", type: "button", text: "+ Post New Job", onClick: () => openVacancyModal(null) })
       : null;
     container.appendChild(
-      renderModuleHeader("Job Vacancy Management", "Create, edit, publish/unpublish, or delete open MILA Talent roles (" + state.data.vacancies.length + ").", addBtn)
+      renderModuleHeader(
+        "Job Vacancies (MILA Admin Only)",
+        "Only MILA Admin can post, edit, publish/unpublish, or delete open roles (" + state.data.vacancies.length + " total). Published jobs appear live in the MILA App Careers tab.",
+        addBtn
+      )
     );
-    container.appendChild(renderSearchBar("Search vacancy title, location, or category..."));
+    container.appendChild(renderSearchBar("Search job title, location, hotel tier, or department...", ["PUBLISHED", "DRAFT"]));
 
     const q = state.searchQuery.trim().toLowerCase();
-    const rows = state.data.vacancies.filter(
-      (v) =>
+    const rows = state.data.vacancies.filter((v) => {
+      const matchStatus =
+        state.statusFilter === "ALL" ||
+        (state.statusFilter === "PUBLISHED" && Boolean(v.published)) ||
+        (state.statusFilter === "DRAFT" && !v.published);
+      const matchQuery =
         !q ||
         (v.title || "").toLowerCase().includes(q) ||
         (v.location || "").toLowerCase().includes(q) ||
-        (v.category || "").toLowerCase().includes(q)
-    );
+        (v.city_region || "").toLowerCase().includes(q) ||
+        (v.property_tier || "").toLowerCase().includes(q) ||
+        (v.category || "").toLowerCase().includes(q);
+      return matchStatus && matchQuery;
+    });
 
     const list = el("div", { className: "records-list" });
     if (!rows.length) {
-      list.appendChild(el("div", { className: "empty-state", text: "No vacancies match this search." }));
+      list.appendChild(
+        el("div", {
+          className: "empty-state",
+          text: state.data.vacancies.length
+            ? "No job vacancies match this search or filter."
+            : "No job vacancies posted yet. Click '+ Post New Job' above to publish a role."
+        })
+      );
     } else {
       rows.forEach((job) => {
-        const actions = [];
-        if (writable) {
-          actions.push(
-            el("button", { className: "btn btn-outline btn-sm", type: "button", text: "Edit", onClick: () => openVacancyModal(job) }),
-            el("button", {
-              className: "btn btn-ghost btn-sm",
-              type: "button",
-              text: job.published ? "Unpublish" : "Publish",
-              onClick: async () => {
-                await mutateTable(
-                  "PATCH",
-                  "/rest/v1/job_vacancies?id=eq." + encodeURIComponent(job.id),
-                  { published: !job.published },
-                  { module: "JOB_VACANCY_MANAGEMENT", action: "UPDATE", targetId: job.id, summary: (job.published ? "Unpublished " : "Published ") + job.title }
-                );
-                showToast("Vacancy visibility updated.");
-                await refreshAllData(false);
-              }
-            }),
-            el("button", {
-              className: "btn btn-danger btn-sm",
-              type: "button",
-              text: "Delete",
-              onClick: () =>
-                confirmDelete("Delete Job Vacancy?", "Delete vacancy '" + job.title + "'?", async () => {
-                  await mutateTable("DELETE", "/rest/v1/job_vacancies?id=eq." + encodeURIComponent(job.id), null, {
-                    module: "JOB_VACANCY_MANAGEMENT",
-                    action: "DELETE",
-                    targetId: job.id,
-                    summary: "Deleted vacancy " + job.title
-                  });
-                  showToast("Vacancy deleted.");
-                })
-            })
-          );
-        }
-        list.appendChild(
-          el("div", { className: "record-card" }, [
-            el("div", { className: "record-top" }, [
-              pill(job.published ? "Published" : "Draft", job.published ? "emerald" : "muted"),
-              job.is_urgent ? pill("Urgent Mandate", "gold") : null
-            ]),
-            el("div", { className: "record-title", text: job.title || "" }),
-            el("div", { className: "record-sub", text: (job.property_tier || "") + " • " + (job.location || "") }),
-            el("div", { className: "record-meta", text: (job.compensation || "") + " • " + (job.experience_required || "") }),
-            actions.length ? el("div", { className: "record-actions" }, actions) : null
-          ])
-        );
+        list.appendChild(buildVacancyCard(job, writable));
       });
     }
     container.appendChild(list);
@@ -1146,76 +1267,114 @@
 
   function openVacancyModal(job) {
     const isEdit = Boolean(job && job.id);
-    const fTitle = el("input", { value: (job && job.title) || "" });
-    const fTier = el("input", { value: (job && job.property_tier) || "5-Star Luxury Hotel" });
-    const fLocation = el("input", { value: (job && job.location) || "Mumbai, Maharashtra" });
-    const fRegion = el("input", { value: (job && job.city_region) || "Mumbai" });
-    const fComp = el("input", { value: (job && job.compensation) || "Executive Package" });
-    const fExp = el("input", { value: (job && job.experience_required) || "8+ Years" });
+    const fTitle = el("input", { value: (job && job.title) || "", placeholder: "e.g., Executive Chef — Luxury Resort" });
+    const fTier = el("input", { value: (job && job.property_tier) || "5-Star Luxury Hotel", placeholder: "e.g., 5-Star Luxury Hotel / Heritage Palace" });
+    const fLocation = el("input", { value: (job && job.location) || "Mumbai, Maharashtra", placeholder: "e.g., Mumbai, Maharashtra" });
+    const currentRegion = (job && job.city_region) || "Mumbai";
+    const regionOptions = CITY_REGIONS.includes(currentRegion) ? CITY_REGIONS : [currentRegion, ...CITY_REGIONS];
+    const fRegion = buildSelect(regionOptions, currentRegion);
+    const fComp = el("input", { value: (job && job.compensation) || "Executive Package", placeholder: "e.g., ₹24–32 LPA + Benefits" });
+    const fExp = el("input", { value: (job && job.experience_required) || "5+ Years", placeholder: "e.g., 5–10 Years" });
     const fMinYrs = el("input", { type: "number", value: String((job && job.min_experience_years) ?? 5) });
     const fCat = buildSelect(ROLE_CATEGORIES, (job && job.category) || "PRE_OPENING");
-    const fSummary = el("textarea", { value: (job && job.summary) || "" });
+    const fSummary = el("textarea", {
+      value: (job && job.summary) || "",
+      placeholder: "Brief overview of the hospitality role, property, and leadership scope..."
+    });
+    const existingMandates = Array.isArray(job && job.key_mandates) ? job.key_mandates.join("\n") : "";
+    const existingSkills = Array.isArray(job && job.desired_skills) ? job.desired_skills.join(", ") : "";
+    const fMandates = el("textarea", {
+      value: existingMandates,
+      placeholder: "One key responsibility per line (optional)"
+    });
+    const fSkills = el("input", {
+      value: existingSkills,
+      placeholder: "Comma-separated skills, e.g., Pre-Opening, Luxury F&B, P&L"
+    });
     const fUrgent = el("input", { type: "checkbox", checked: Boolean(job && job.is_urgent) });
     const fPublished = el("input", { type: "checkbox", checked: job ? Boolean(job.published) : true });
 
     openModal(
-      isEdit ? "Edit Job Vacancy" : "Create Job Vacancy",
+      isEdit ? "Edit Job Vacancy" : "Post New Job (MILA Admin)",
       [
-        buildFormField("Role Title *", fTitle),
-        buildFormField("Property Tier", fTier),
-        buildFormField("Location", fLocation),
-        buildFormField("City Region", fRegion),
-        buildFormField("Compensation", fComp),
-        buildFormField("Experience Label", fExp),
-        buildFormField("Min Experience (Years)", fMinYrs),
-        buildFormField("Category", fCat),
-        buildFormField("Summary", fSummary),
-        el("label", { className: "checkbox-row" }, [fUrgent, "Mark as Urgent Mandate"]),
-        el("label", { className: "checkbox-row" }, [fPublished, "Published immediately"])
+        buildFormField("Job Title *", fTitle),
+        buildFormField("Property Tier / Brand", fTier),
+        buildFormField("Location (City, State) *", fLocation),
+        buildFormField("City Region Filter", fRegion),
+        buildFormField("Department / Category", fCat),
+        buildFormField("Compensation / Salary", fComp),
+        buildFormField("Experience Required", fExp),
+        buildFormField("Minimum Years Experience", fMinYrs),
+        buildFormField("Job Summary", fSummary),
+        buildFormField("Key Responsibilities (1 per line)", fMandates),
+        buildFormField("Desired Skills (comma separated)", fSkills),
+        el("label", { className: "checkbox-row" }, [fUrgent, "Mark as Priority / Urgent Search"]),
+        el("label", { className: "checkbox-row" }, [fPublished, "Publish live to MILA App immediately"])
       ],
       [
         el("button", { className: "btn btn-ghost", type: "button", text: "Cancel", onClick: closeModal }),
         el("button", {
           className: "btn btn-gold",
           type: "button",
-          text: isEdit ? "Save Vacancy" : "Create Vacancy",
+          text: isEdit ? "Save Changes" : "Post Job Now",
           onClick: async () => {
             const title = fTitle.value.trim();
+            const location = fLocation.value.trim();
             if (!title) {
-              showToast("Role title is required.");
+              showToast("Job title is required.");
+              return;
+            }
+            if (!location) {
+              showToast("Location is required.");
               return;
             }
             const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + (Date.now() % 10000);
+            const mandates = fMandates.value
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const skills = fSkills.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
             const payload = {
               title,
-              property_tier: fTier.value.trim(),
-              location: fLocation.value.trim(),
-              city_region: fRegion.value.trim(),
-              compensation: fComp.value.trim(),
-              experience_required: fExp.value.trim(),
+              property_tier: fTier.value.trim() || "Luxury Hospitality Property",
+              location,
+              city_region: fRegion.value,
+              compensation: fComp.value.trim() || "Competitive Package",
+              experience_required: fExp.value.trim() || "3+ Years",
               min_experience_years: Math.max(0, Math.min(50, parseInt(fMinYrs.value, 10) || 0)),
               category: fCat.value,
-              summary: fSummary.value.trim() || "Hospitality leadership role managed by MILA Talent.",
+              summary: fSummary.value.trim() || "Hospitality role posted and managed exclusively by MILA Hospitality.",
+              key_mandates: mandates.length ? mandates : ["Operational leadership & luxury guest service excellence"],
+              desired_skills: skills.length ? skills : ["Luxury Hospitality"],
               is_urgent: fUrgent.checked,
               published: fPublished.checked
             };
             if (!isEdit) {
               payload.slug = slug;
-              payload.key_mandates = ["Operational leadership & service excellence"];
-              payload.desired_skills = ["Luxury Hospitality"];
+              if (state.admin && state.admin.uid) {
+                payload.created_by = state.admin.uid;
+              }
             }
             try {
               await mutateTable(
                 isEdit ? "PATCH" : "POST",
                 isEdit ? "/rest/v1/job_vacancies?id=eq." + encodeURIComponent(job.id) : "/rest/v1/job_vacancies",
                 payload,
-                { module: "JOB_VACANCY_MANAGEMENT", action: isEdit ? "UPDATE" : "CREATE", targetId: isEdit ? job.id : slug, summary: "Saved vacancy " + title }
+                {
+                  module: "JOB_VACANCY_MANAGEMENT",
+                  action: isEdit ? "UPDATE" : "CREATE",
+                  targetId: isEdit ? job.id : slug,
+                  summary: (isEdit ? "Updated job " : "Posted job ") + title
+                }
               );
               closeModal();
-              showToast("Vacancy saved.");
+              showToast(isEdit ? "Job updated." : (fPublished.checked ? "Job posted and live in MILA App." : "Job saved as draft."));
               await refreshAllData(false);
             } catch (err) {
-              showToast(err.message || "Failed to save vacancy.");
+              showToast(err.message || "Failed to save job.");
             }
           }
         })

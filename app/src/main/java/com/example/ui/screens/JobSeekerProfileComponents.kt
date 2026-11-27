@@ -324,18 +324,18 @@ fun PrivateCvVaultCard(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "PRIVATE CV VAULT",
+                        text = "YOUR CV / RESUME",
                         style = MaterialTheme.typography.labelMedium.copy(
                             color = MilaChampagneGold,
                             letterSpacing = 1.5.sp
                         )
                     )
                 }
-                StatusPill(label = "No Public Links", tone = StatusTone.EMERALD)
+                StatusPill(label = "Private", tone = StatusTone.EMERALD)
             }
 
             Text(
-                text = "Upload your CV in PDF, DOC, or DOCX (max 10 MB). Stored strictly in owner-scoped private storage with zero public download URLs.",
+                text = "Upload or update your CV (PDF, DOC, or DOCX, up to 10 MB). Automatically attached when you apply for jobs.",
                 style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
             )
 
@@ -368,7 +368,7 @@ fun PrivateCvVaultCard(
                             val sizeKb = ((profile.cvFileSizeBytes ?: 0L) / 1024L).coerceAtLeast(1L)
                             val extLabel = profile.cvFileName.orEmpty().substringAfterLast('.', "PDF").uppercase()
                             Text(
-                                text = "$extLabel • $sizeKb KB • Private Bucket Vault",
+                                text = "$extLabel • $sizeKb KB • Ready for applications",
                                 style = MaterialTheme.typography.bodySmall.copy(color = MilaEmerald)
                             )
                         }
@@ -379,7 +379,7 @@ fun PrivateCvVaultCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     GoldOutlineButton(
-                        text = if (isProcessing) "Replacing..." else "Replace CV",
+                        text = if (isProcessing) "Updating..." else "Update CV",
                         onClick = {
                             if (!isProcessing) {
                                 documentPicker.launch(CandidateValidator.ALLOWED_CV_MIME_TYPES.toTypedArray())
@@ -405,7 +405,7 @@ fun PrivateCvVaultCard(
                     ) {
                         Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = MilaTerracotta, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Delete CV", color = MilaTerracotta)
+                        Text("Remove CV", color = MilaTerracotta)
                     }
                 }
             } else {
@@ -430,23 +430,25 @@ fun CandidateProfileEditorCard(
     isSaving: Boolean,
     onSaveProfile: (CandidateProfile) -> Unit
 ) {
-    var fullName by remember(initialProfile) { mutableStateOf(initialProfile.fullName) }
-    var email by remember(initialProfile) { mutableStateOf(initialProfile.email) }
+    var fullName by remember(initialProfile) {
+        mutableStateOf(
+            initialProfile.fullName.takeUnless { it.equals("MILA Guest", ignoreCase = true) }.orEmpty()
+        )
+    }
     var mobileNumber by remember(initialProfile) { mutableStateOf(initialProfile.mobileNumber) }
-    var location by remember(initialProfile) { mutableStateOf(initialProfile.location) }
     var currentDesignation by remember(initialProfile) { mutableStateOf(initialProfile.currentDesignation) }
-    var department by remember(initialProfile) { mutableStateOf(initialProfile.resolvedDepartment) }
     var totalExpText by remember(initialProfile) {
         mutableStateOf(if (initialProfile.totalExperienceYears > 0L) initialProfile.totalExperienceYears.toString() else "")
     }
     var currentEmployer by remember(initialProfile) { mutableStateOf(initialProfile.currentEmployer) }
-    var previousEmployers by remember(initialProfile) { mutableStateOf(initialProfile.previousEmployers) }
-    var education by remember(initialProfile) { mutableStateOf(initialProfile.education) }
+    var location by remember(initialProfile) { mutableStateOf(initialProfile.location) }
+    var department by remember(initialProfile) { mutableStateOf(initialProfile.resolvedDepartment) }
+    var email by remember(initialProfile) {
+        mutableStateOf(
+            initialProfile.email.takeUnless { it.endsWith("@phone.mila.local", ignoreCase = true) }.orEmpty()
+        )
+    }
     var skills by remember(initialProfile) { mutableStateOf(initialProfile.skills) }
-    var preferredLocations by remember(initialProfile) { mutableStateOf(initialProfile.preferredJobLocations) }
-    var expectedSalary by remember(initialProfile) { mutableStateOf(initialProfile.expectedSalary) }
-    var availability by remember(initialProfile) { mutableStateOf(initialProfile.resolvedAvailability) }
-    var noticePeriod by remember(initialProfile) { mutableStateOf(initialProfile.noticePeriod.ifBlank { "30 Days" }) }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     Card(
@@ -462,18 +464,30 @@ fun CandidateProfileEditorCard(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.UploadFile, contentDescription = null, tint = MilaChampagneGold, modifier = Modifier.size(18.dp))
                 Text(
-                    text = "CANDIDATE CAREER DOSSIER (15 FIELDS)",
+                    text = "EXPERIENCE & DETAILS",
                     style = MaterialTheme.typography.labelMedium.copy(color = MilaChampagneGold, letterSpacing = 1.4.sp)
                 )
             }
+            Text(
+                text = "Keep your basics updated for quick job applications.",
+                style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
+            )
 
-            CandidateTextField(fullName, { if (it.length <= 100) fullName = it }, "1. Full Name *", "Full Name", "edit_cand_full_name")
-            CandidateTextField(email, { if (it.length <= 120) email = it }, "2. Email *", "candidate@hospitality.in", "edit_cand_email", KeyboardType.Email)
-            CandidateTextField(mobileNumber, { if (it.length <= 25) mobileNumber = it }, "3. Mobile Number *", "+91 98100 00000", "edit_cand_mobile", KeyboardType.Phone)
-            CandidateTextField(location, { if (it.length <= 80) location = it }, "4. Current Location *", "e.g., Mumbai, Maharashtra", "edit_cand_location")
-            CandidateTextField(currentDesignation, { if (it.length <= 100) currentDesignation = it }, "5. Current Designation *", "e.g., General Manager / Head Chef", "edit_cand_designation")
+            CandidateTextField(fullName, { if (it.length <= 100) fullName = it }, "Full Name *", "Your full name", "edit_cand_full_name")
+            CandidateTextField(mobileNumber, { if (it.length <= 25) mobileNumber = it }, "Mobile Number *", "+91 98100 00000", "edit_cand_mobile", KeyboardType.Phone)
+            CandidateTextField(currentDesignation, { if (it.length <= 100) currentDesignation = it }, "Current Role / Position", "e.g., Executive Chef, General Manager", "edit_cand_designation")
+            CandidateTextField(
+                value = totalExpText,
+                onValueChange = { input -> if (input.length <= 2 && input.all { it.isDigit() }) totalExpText = input },
+                label = "Years of Experience",
+                placeholder = "e.g., 5",
+                testTag = "edit_cand_experience",
+                keyboardType = KeyboardType.Number
+            )
+            CandidateTextField(currentEmployer, { if (it.length <= 120) currentEmployer = it }, "Current / Recent Hotel or Restaurant", "Property or hospitality group", "edit_cand_current_employer")
+            CandidateTextField(location, { if (it.length <= 80) location = it }, "Current City", "e.g., Mumbai, Goa, Udaipur", "edit_cand_location")
 
-            Text("6. DEPARTMENT *", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
+            Text("DEPARTMENT", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 HospitalityDepartment.entries.forEach { dept ->
                     val selected = department == dept
@@ -498,98 +512,43 @@ fun CandidateProfileEditorCard(
                 }
             }
 
-            CandidateTextField(
-                value = totalExpText,
-                onValueChange = { input -> if (input.length <= 2 && input.all { it.isDigit() }) totalExpText = input },
-                label = "7. Total Experience (Years) *",
-                placeholder = "e.g., 10",
-                testTag = "edit_cand_experience",
-                keyboardType = KeyboardType.Number
-            )
-            CandidateTextField(currentEmployer, { if (it.length <= 120) currentEmployer = it }, "8. Current Employer *", "Hotel or Hospitality Group", "edit_cand_current_employer")
-            CandidateTextField(previousEmployers, { if (it.length <= 500) previousEmployers = it }, "9. Previous Employers", "Prior hotels, resorts, or F&B groups", "edit_cand_prev_employers", minLines = 2)
-            CandidateTextField(education, { if (it.length <= 200) education = it }, "10. Education *", "Degree, Hospitality Institute & Certifications", "edit_cand_education")
-            CandidateTextField(skills, { if (it.length <= 400) skills = it }, "11. Key Skills *", "Pre-opening, Mixology, P&L, HACCP", "edit_cand_skills", minLines = 2)
-            CandidateTextField(preferredLocations, { if (it.length <= 200) preferredLocations = it }, "12. Preferred Job Locations *", "Mumbai, Goa, Bengaluru, Udaipur", "edit_cand_pref_locations")
-            CandidateTextField(expectedSalary, { if (it.length <= 80) expectedSalary = it }, "13. Expected Salary *", "e.g., ₹24 – 30 LPA", "edit_cand_salary")
-
-            Text("14. AVAILABILITY *", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                CandidateAvailability.entries.forEach { avail ->
-                    val selected = availability == avail
-                    FilterChip(
-                        selected = selected,
-                        onClick = { availability = avail },
-                        label = { Text(avail.label) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MilaChampagneGold,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                            containerColor = MilaCharcoalDeep,
-                            labelColor = MilaIvoryMuted
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = selected,
-                            borderColor = MilaCharcoalBorder,
-                            selectedBorderColor = MilaChampagneGold
-                        ),
-                        modifier = Modifier.testTag("edit_cand_avail_${avail.name}")
-                    )
-                }
-            }
-
-            Text("15. NOTICE PERIOD *", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                noticePeriodOptions.forEach { option ->
-                    val selected = noticePeriod == option
-                    FilterChip(
-                        selected = selected,
-                        onClick = { noticePeriod = option },
-                        label = { Text(option) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MilaChampagneGold,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                            containerColor = MilaCharcoalDeep,
-                            labelColor = MilaIvoryMuted
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = selected,
-                            borderColor = MilaCharcoalBorder,
-                            selectedBorderColor = MilaChampagneGold
-                        )
-                    )
-                }
-            }
+            CandidateTextField(email, { if (it.length <= 120) email = it }, "Email Address (Optional)", "you@example.com", "edit_cand_email", KeyboardType.Email)
+            CandidateTextField(skills, { if (it.length <= 400) skills = it }, "Key Skills (Optional)", "e.g., Pre-opening, Culinary, Mixology, Operations", "edit_cand_skills", minLines = 2)
 
             validationError?.let { Text(it, style = MaterialTheme.typography.bodySmall.copy(color = MilaTerracotta)) }
 
             GoldFilledButton(
-                text = if (isSaving) "Saving Career Dossier..." else "Save Candidate Profile",
+                text = if (isSaving) "Saving..." else "Save Profile & Experience",
                 enabled = !isSaving,
                 testTag = "save_candidate_profile_button",
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
-                    val updated = initialProfile.copy(
-                        fullName = fullName.trim(),
-                        email = email.trim(),
-                        mobileNumber = mobileNumber.trim(),
-                        location = location.trim(),
-                        currentDesignation = currentDesignation.trim(),
-                        department = department.name,
-                        totalExperienceYears = totalExpText.toLongOrNull() ?: -1L,
-                        currentEmployer = currentEmployer.trim(),
-                        previousEmployers = previousEmployers.trim(),
-                        education = education.trim(),
-                        skills = skills.trim(),
-                        preferredJobLocations = preferredLocations.trim(),
-                        expectedSalary = expectedSalary.trim(),
-                        availability = availability.name,
-                        noticePeriod = noticePeriod.trim()
-                    )
-                    val err = CandidateValidator.validateProfileFields(updated)
+                    val trimmedName = fullName.trim()
+                    val trimmedMobile = mobileNumber.trim()
+                    val trimmedEmail = email.trim()
+                    val parsedYears = totalExpText.trim().toLongOrNull() ?: 0L
+                    val err = when {
+                        trimmedName.length < 2 -> "Please enter your full name."
+                        trimmedMobile.length < 7 -> "Please enter a valid mobile number."
+                        trimmedEmail.isNotEmpty() && !trimmedEmail.contains("@") -> "Please enter a valid email address."
+                        parsedYears !in 0L..60L -> "Experience must be between 0 and 60 years."
+                        else -> null
+                    }
                     validationError = err
-                    if (err == null) onSaveProfile(updated)
+                    if (err == null) {
+                        val updated = initialProfile.copy(
+                            fullName = trimmedName,
+                            email = trimmedEmail,
+                            mobileNumber = trimmedMobile,
+                            location = location.trim(),
+                            currentDesignation = currentDesignation.trim(),
+                            department = department.name,
+                            totalExperienceYears = parsedYears,
+                            currentEmployer = currentEmployer.trim(),
+                            skills = skills.trim()
+                        )
+                        onSaveProfile(updated)
+                    }
                 }
             )
         }

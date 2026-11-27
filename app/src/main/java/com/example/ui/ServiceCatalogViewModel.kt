@@ -28,6 +28,9 @@ class ServiceCatalogViewModel(
 
     private val _supabaseServices = MutableStateFlow<List<ConsultancyService>>(emptyList())
     private val _supabaseVacancies = MutableStateFlow<List<HospitalityRole>>(emptyList())
+    private val _hasLoadedSupabaseVacancies = MutableStateFlow(false)
+    private val _isRefreshingVacancies = MutableStateFlow(false)
+    val isRefreshingVacancies: StateFlow<Boolean> = _isRefreshingVacancies.asStateFlow()
     private val _supabasePortfolio = MutableStateFlow<List<CaseStudy>>(emptyList())
     private val _supabaseTestimonials = MutableStateFlow<List<Testimonial>>(emptyList())
     private val _websiteContent = MutableStateFlow<List<SitePageContent>>(emptyList())
@@ -41,10 +44,27 @@ class ServiceCatalogViewModel(
         if (!supabaseDb.isConfigured()) return
         viewModelScope.launch {
             supabaseDb.fetchPublishedServices().onSuccess { if (it.isNotEmpty()) _supabaseServices.value = it }
-            supabaseDb.fetchPublishedVacancies().onSuccess { if (it.isNotEmpty()) _supabaseVacancies.value = it }
+            _isRefreshingVacancies.value = true
+            supabaseDb.fetchPublishedVacancies().onSuccess {
+                _supabaseVacancies.value = it
+                _hasLoadedSupabaseVacancies.value = true
+            }
+            _isRefreshingVacancies.value = false
             supabaseDb.fetchPublishedPortfolio().onSuccess { if (it.isNotEmpty()) _supabasePortfolio.value = it }
             supabaseDb.fetchPublishedTestimonials().onSuccess { if (it.isNotEmpty()) _supabaseTestimonials.value = it }
             supabaseDb.fetchPublishedWebsiteContent().onSuccess { if (it.isNotEmpty()) _websiteContent.value = it }
+        }
+    }
+
+    fun refreshVacancies() {
+        if (!supabaseDb.isConfigured()) return
+        viewModelScope.launch {
+            _isRefreshingVacancies.value = true
+            supabaseDb.fetchPublishedVacancies().onSuccess {
+                _supabaseVacancies.value = it
+                _hasLoadedSupabaseVacancies.value = true
+            }
+            _isRefreshingVacancies.value = false
         }
     }
 
@@ -61,9 +81,10 @@ class ServiceCatalogViewModel(
 
     val vacancies: StateFlow<List<HospitalityRole>> = combine(
         publicCmsRepository?.observePublishedVacancies() ?: flowOf(MilaCatalog.openRoles),
-        _supabaseVacancies
-    ) { firestoreList, supabaseList ->
-        if (supabaseList.isNotEmpty()) supabaseList else firestoreList
+        _supabaseVacancies,
+        _hasLoadedSupabaseVacancies
+    ) { firestoreList, supabaseList, hasLoadedSupabase ->
+        if (hasLoadedSupabase) supabaseList else firestoreList
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),

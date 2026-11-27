@@ -76,6 +76,7 @@ fun AdminVacanciesModule(
     val canWrite = actor.resolvedRole.canMutate(AdminModule.JOB_VACANCY_MANAGEMENT)
     var query by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<JobVacancyRecord?>(null) }
+    var deleting by remember { mutableStateOf<JobVacancyRecord?>(null) }
 
     val filtered = remember(vacancies, query) {
         val q = query.trim().lowercase()
@@ -92,9 +93,9 @@ fun AdminVacanciesModule(
         item {
             AdminModuleHeader(
                 module = AdminModule.JOB_VACANCY_MANAGEMENT,
-                subtitle = "Publish, edit, and prioritize open MILA Talent hospitality roles (${vacancies.size} total).",
+                subtitle = "MILA Admin Exclusive — Post, edit, publish/unpublish, or delete open hospitality roles (${vacancies.size} total).",
                 canAdd = canWrite,
-                addLabel = "New Job Vacancy",
+                addLabel = "Post New Job",
                 onAddClick = { editing = JobVacancyRecord() },
                 isReadOnly = !canWrite
             )
@@ -124,13 +125,20 @@ fun AdminVacanciesModule(
                         Text("${job.compensation} • ${job.experienceRequired}", style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone))
                         if (canWrite) {
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                GoldOutlineButton("Edit", { editing = job }, "edit_job_${job.id}")
+                                GoldOutlineButton("Edit Job", { editing = job }, "edit_job_${job.id}")
                                 GoldOutlineButton(
                                     if (job.published) "Unpublish" else "Publish",
                                     { onSaveVacancy(job.copy(published = !job.published)) },
                                     "toggle_job_${job.id}"
                                 )
-                                TextButton(onClick = { onDeleteVacancy(job) }) {
+                                TextButton(onClick = { deleting = job }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = "Delete job",
+                                        tint = MilaTerracotta,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
                                     Text("Delete", color = MilaTerracotta)
                                 }
                             }
@@ -195,16 +203,18 @@ fun AdminVacanciesModule(
             },
             confirmButton = {
                 GoldFilledButton(
-                    text = "Save Vacancy",
+                    text = if (job.id.isBlank()) "Post Job" else "Save Job",
+                    enabled = title.trim().isNotEmpty(),
                     onClick = {
+                        if (title.trim().isEmpty()) return@GoldFilledButton
                         onSaveVacancy(
                             job.copy(
-                                title = title,
-                                propertyTier = tier,
-                                location = location,
-                                cityRegion = region,
-                                compensation = comp,
-                                experienceRequired = expLabel,
+                                title = title.trim(),
+                                propertyTier = tier.trim(),
+                                location = location.trim(),
+                                cityRegion = region.trim(),
+                                compensation = comp.trim(),
+                                experienceRequired = expLabel.trim(),
                                 minExperienceYears = (minYears.toLongOrNull() ?: 5L).coerceIn(0L, 60L),
                                 category = category.name,
                                 summary = summary.ifBlank { "Hospitality leadership mandate managed via MILA Talent." },
@@ -220,6 +230,33 @@ fun AdminVacanciesModule(
             },
             dismissButton = {
                 TextButton(onClick = { editing = null }) { Text("Cancel", color = MilaWarmStone) }
+            }
+        )
+    }
+
+    deleting?.let { job ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = MilaCharcoalSurface,
+            title = { Text("Delete Job Vacancy?", color = MilaIvory) },
+            text = {
+                Text(
+                    "Permanently delete '${job.title}' (${job.location})? It will be removed from the MILA App Careers tab immediately.",
+                    color = MilaIvoryMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteVacancy(job)
+                        deleting = null
+                    }
+                ) {
+                    Text("Delete Permanently", color = MilaTerracotta)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) { Text("Cancel", color = MilaWarmStone) }
             }
         )
     }

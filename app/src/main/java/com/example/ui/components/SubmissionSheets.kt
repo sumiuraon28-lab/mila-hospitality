@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,21 +32,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.auth.CandidateValidator
+import com.example.auth.PrivateCvMetadata
 import com.example.auth.SupabaseCandidateSession
 import com.example.auth.SupabaseSession
+import com.example.auth.SupabaseTalentClient
 import com.example.data.CandidateProfile
 import com.example.data.ClientProfile
 import com.example.data.ConsultationInquiry
 import com.example.data.ConsultationServiceType
 import com.example.data.HospitalityRole
 import com.example.data.JobApplication
+import com.example.data.PrivateCvLocalVault
+import kotlinx.coroutines.launch
 import com.example.ui.theme.MilaChampagneGold
 import com.example.ui.theme.MilaCharcoalBorder
 import com.example.ui.theme.MilaCharcoalDeep
@@ -73,27 +82,33 @@ fun ConsultationRequestSheet(
     var propertyName by remember(clientProfile, supabaseSession) {
         mutableStateOf(
             clientProfile?.companyName?.takeIf { it.isNotBlank() }
-                ?: supabaseSession?.metadata?.companyName.orEmpty()
+                ?: supabaseSession?.metadata?.companyName
+                    ?.takeIf { it.isNotBlank() && !it.equals("MILA Hospitality Member", ignoreCase = true) }
+                    .orEmpty()
         )
     }
     var city by remember(clientProfile, supabaseSession) {
         mutableStateOf(
             clientProfile?.city?.takeIf { it.isNotBlank() }
-                ?: supabaseSession?.metadata?.city.orEmpty()
+                ?: supabaseSession?.metadata?.city
+                    ?.takeIf { it.isNotBlank() && !it.equals("India", ignoreCase = true) }
+                    .orEmpty()
         )
     }
     var scaleSummary by remember { mutableStateOf("") }
     var contactName by remember(currentUser, clientProfile, supabaseSession) {
         mutableStateOf(
             clientProfile?.fullName?.takeIf { it.isNotBlank() }
-                ?: supabaseSession?.metadata?.fullName?.takeIf { it.isNotBlank() }
+                ?: supabaseSession?.metadata?.fullName
+                    ?.takeIf { it.isNotBlank() && !it.equals("MILA Guest", ignoreCase = true) }
                 ?: currentUser?.displayName.orEmpty()
         )
     }
     var contactEmail by remember(currentUser, clientProfile, supabaseSession) {
         mutableStateOf(
             clientProfile?.email?.takeIf { it.isNotBlank() }
-                ?: supabaseSession?.email?.takeIf { it.isNotBlank() }
+                ?: supabaseSession?.email
+                    ?.takeIf { it.isNotBlank() && !it.endsWith("@phone.mila.local", ignoreCase = true) }
                 ?: currentUser?.email.orEmpty()
         )
     }
@@ -277,23 +292,42 @@ fun JobApplicationSheet(
     onSubmit: (JobApplication) -> Unit,
     candidateProfile: CandidateProfile? = null,
     supabaseCandidateSession: SupabaseCandidateSession? = null,
+    supabaseSession: SupabaseSession? = null,
+    supabaseTalentClient: SupabaseTalentClient? = null,
+    onCvUploaded: ((PrivateCvMetadata) -> Unit)? = null,
     scrollable: Boolean = true
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val activeProfile = candidateProfile ?: supabaseCandidateSession?.profile
-    var candidateName by remember(currentUser, activeProfile) {
+    val activeUserId = currentUser?.uid?.takeIf { it.isNotBlank() }
+        ?: supabaseCandidateSession?.userId?.takeIf { it.isNotBlank() }
+        ?: supabaseSession?.userId?.takeIf { it.isNotBlank() }
+        ?: "candidate_local"
+
+    var candidateName by remember(currentUser, activeProfile, supabaseSession) {
         mutableStateOf(
-            activeProfile?.fullName?.takeIf { it.isNotBlank() }
+            activeProfile?.fullName
+                ?.takeIf { it.isNotBlank() && !it.equals("MILA Guest", ignoreCase = true) }
+                ?: supabaseSession?.metadata?.fullName
+                    ?.takeIf { it.isNotBlank() && !it.equals("MILA Guest", ignoreCase = true) }
                 ?: currentUser?.displayName.orEmpty()
         )
     }
-    var candidateEmail by remember(currentUser, activeProfile) {
+    var candidateEmail by remember(currentUser, activeProfile, supabaseSession) {
         mutableStateOf(
-            activeProfile?.email?.takeIf { it.isNotBlank() }
+            activeProfile?.email
+                ?.takeIf { it.isNotBlank() && !it.endsWith("@phone.mila.local", ignoreCase = true) }
+                ?: supabaseSession?.email
+                    ?.takeIf { it.isNotBlank() && !it.endsWith("@phone.mila.local", ignoreCase = true) }
                 ?: currentUser?.email.orEmpty()
         )
     }
-    var candidatePhone by remember(activeProfile) {
-        mutableStateOf(activeProfile?.mobileNumber.orEmpty())
+    var candidatePhone by remember(activeProfile, supabaseSession) {
+        mutableStateOf(
+            activeProfile?.mobileNumber?.takeIf { it.isNotBlank() }
+                ?: supabaseSession?.metadata?.mobileNumber.orEmpty()
+        )
     }
     var yearsExpText by remember(activeProfile) {
         val yrs = activeProfile?.totalExperienceYears ?: 0L
@@ -304,8 +338,52 @@ fun JobApplicationSheet(
     }
     var coverNote by remember { mutableStateOf("") }
     var validationError by remember { mutableStateOf<String?>(null) }
+    var isUploadingCv by remember { mutableStateOf(false) }
+    var uploadedCvNameOverride by remember { mutableStateOf<String?>(null) }
 
-    val attachedCvName = activeProfile?.cvFileName?.takeIf { it.isNotBlank() }
+    val attachedCvName = uploadedCvNameOverride ?: activeProfile?.cvFileName?.takeIf { it.isNotBlank() }
+
+    val cvPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null || supabaseTalentClient == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isUploadingCv = true
+            validationError = null
+            val readResult = PrivateCvLocalVault.readPickedCv(context, uri)
+            readResult.fold(
+                onSuccess = { picked ->
+                    val uploadResult = supabaseTalentClient.uploadOrReplacePrivateCv(
+                        userId = activeUserId,
+                        fileName = picked.fileName,
+                        mimeType = picked.mimeType,
+                        bytes = picked.bytes,
+                        previousStoragePath = activeProfile?.cvStoragePath
+                    )
+                    uploadResult.fold(
+                        onSuccess = { metadata ->
+                            PrivateCvLocalVault.saveOwnerOnlyCopy(
+                                context = context,
+                                userId = activeUserId,
+                                storagePath = metadata.storagePath,
+                                bytes = picked.bytes,
+                                previousStoragePath = activeProfile?.cvStoragePath
+                            )
+                            uploadedCvNameOverride = metadata.fileName
+                            onCvUploaded?.invoke(metadata)
+                        },
+                        onFailure = { err ->
+                            validationError = err.localizedMessage ?: "CV upload failed."
+                        }
+                    )
+                },
+                onFailure = { err ->
+                    validationError = err.localizedMessage ?: "Please select a PDF, DOC, or DOCX file."
+                }
+            )
+            isUploadingCv = false
+        }
+    }
 
     val baseModifier = if (scrollable) {
         Modifier
@@ -322,7 +400,7 @@ fun JobApplicationSheet(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "EXECUTIVE CANDIDATE APPLICATION",
+            text = "QUICK JOB APPLICATION",
             style = MaterialTheme.typography.labelMedium.copy(
                 color = MilaChampagneGold,
                 letterSpacing = 1.6.sp
@@ -337,7 +415,7 @@ fun JobApplicationSheet(
             style = MaterialTheme.typography.bodySmall.copy(color = MilaChampagneGold)
         )
 
-        if (currentUser == null && supabaseCandidateSession == null) {
+        if (currentUser == null && supabaseCandidateSession == null && supabaseSession == null) {
             AuthGateCard(
                 title = "Sign In to Submit Your Candidacy",
                 subtitle = "MILA executive applications are linked to your verified account for real-time status tracking and private CV attachment.",
@@ -351,27 +429,47 @@ fun JobApplicationSheet(
                 shape = MaterialTheme.shapes.small,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Description,
-                        contentDescription = null,
-                        tint = if (attachedCvName != null) MilaEmerald else MilaWarmStone,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = if (attachedCvName != null) {
-                            "Private CV attached from vault: $attachedCvName (no public link)"
-                        } else {
-                            "No private CV uploaded yet — attach PDF, DOC, or DOCX in Job Seeker Portal -> Profile & CV."
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = if (attachedCvName != null) MilaIvory else MilaWarmStone
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Description,
+                            contentDescription = null,
+                            tint = if (attachedCvName != null) MilaEmerald else MilaChampagneGold,
+                            modifier = Modifier.size(18.dp)
                         )
-                    )
+                        Text(
+                            text = if (attachedCvName != null) {
+                                "CV attached: $attachedCvName"
+                            } else {
+                                "Attach your CV (PDF, DOC, or DOCX) — optional"
+                            },
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = if (attachedCvName != null) MilaIvory else MilaWarmStone
+                            )
+                        )
+                    }
+                    if (supabaseTalentClient != null) {
+                        GoldOutlineButton(
+                            text = when {
+                                isUploadingCv -> "Uploading CV..."
+                                attachedCvName != null -> "Update CV"
+                                else -> "Upload CV"
+                            },
+                            onClick = {
+                                if (!isUploadingCv) {
+                                    cvPicker.launch(CandidateValidator.ALLOWED_CV_MIME_TYPES.toTypedArray())
+                                }
+                            },
+                            testTag = "apply_upload_cv_button",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 
@@ -379,21 +477,13 @@ fun JobApplicationSheet(
                 value = candidateName,
                 onValueChange = { if (it.length <= 100) candidateName = it },
                 label = "Full Name *",
-                placeholder = "Candidate Name",
+                placeholder = "Your full name",
                 testTag = "apply_input_name"
-            )
-            MilaFormField(
-                value = candidateEmail,
-                onValueChange = { if (it.length <= 120) candidateEmail = it },
-                label = "Email Address *",
-                placeholder = "candidate@hospitality.in",
-                keyboardType = KeyboardType.Email,
-                testTag = "apply_input_email"
             )
             MilaFormField(
                 value = candidatePhone,
                 onValueChange = { if (it.length <= 25) candidatePhone = it },
-                label = "Phone Number *",
+                label = "Mobile Number *",
                 placeholder = "+91 98111 00000",
                 keyboardType = KeyboardType.Phone,
                 testTag = "apply_input_phone"
@@ -405,24 +495,32 @@ fun JobApplicationSheet(
                         yearsExpText = input
                     }
                 },
-                label = "Years of Hospitality Experience *",
-                placeholder = "e.g., 10",
+                label = "Years of Experience *",
+                placeholder = "e.g., 5",
                 keyboardType = KeyboardType.Number,
                 testTag = "apply_input_experience"
             )
             MilaFormField(
                 value = currentProperty,
                 onValueChange = { if (it.length <= 120) currentProperty = it },
-                label = "Current / Most Recent Property or Group *",
-                placeholder = "e.g., Luxury Hotel or Restaurant Group",
+                label = "Current / Recent Hotel or Restaurant (Optional)",
+                placeholder = "e.g., Taj, Oberoi, or Restaurant Name",
                 testTag = "apply_input_property"
+            )
+            MilaFormField(
+                value = candidateEmail,
+                onValueChange = { if (it.length <= 120) candidateEmail = it },
+                label = "Email Address (Optional)",
+                placeholder = "you@example.com",
+                keyboardType = KeyboardType.Email,
+                testTag = "apply_input_email"
             )
             MilaFormField(
                 value = coverNote,
                 onValueChange = { if (it.length <= 1000) coverNote = it },
-                label = "Pre-Opening / Leadership Highlights (Optional)",
-                placeholder = "Key P&L achievements, openings led, or milestones...",
-                minLines = 3,
+                label = "Short Note (Optional)",
+                placeholder = "Brief highlights or availability...",
+                minLines = 2,
                 testTag = "apply_input_note"
             )
 
@@ -436,25 +534,30 @@ fun JobApplicationSheet(
             Spacer(modifier = Modifier.height(4.dp))
             GoldFilledButton(
                 text = if (isSubmitting) "Submitting Application..." else "Submit Application",
-                enabled = !isSubmitting,
+                enabled = !isSubmitting && !isUploadingCv,
                 testTag = "submit_application_button",
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     val years = yearsExpText.toLongOrNull()
                     validationError = validateApplication(
-                        candidateName, candidateEmail, candidatePhone, years, currentProperty
+                        candidateName, candidateEmail, candidatePhone, years
                     )
                     if (validationError == null && years != null) {
+                        val safeEmail = candidateEmail.trim().ifBlank {
+                            supabaseSession?.email?.takeIf { it.isNotBlank() }
+                                ?: currentUser?.email?.takeIf { it.isNotBlank() }
+                                ?: "${candidatePhone.filter { it.isDigit() }.ifBlank { "candidate" }}@phone.mila.local"
+                        }
                         onSubmit(
                             JobApplication(
                                 roleId = role.id,
                                 roleTitle = role.title,
                                 location = role.location,
                                 candidateName = candidateName.trim(),
-                                candidateEmail = candidateEmail.trim(),
+                                candidateEmail = safeEmail,
                                 candidatePhone = candidatePhone.trim(),
                                 yearsExperience = years,
-                                currentProperty = currentProperty.trim(),
+                                currentProperty = currentProperty.trim().ifBlank { "Hospitality Professional" },
                                 coverNote = coverNote.trim().takeIf { it.isNotEmpty() },
                                 cvFileName = attachedCvName
                             )
@@ -525,15 +628,13 @@ private fun validateApplication(
     name: String,
     email: String,
     phone: String,
-    years: Long?,
-    currentProperty: String
+    years: Long?
 ): String? {
     return when {
         name.trim().length < 2 -> "Please enter your full name."
-        !email.contains("@") || email.trim().length < 5 -> "Please enter a valid email address."
-        phone.trim().length < 7 -> "Please enter a valid phone number."
-        years == null || years !in 0L..60L -> "Please enter valid years of experience (0–60)."
-        currentProperty.trim().length < 2 -> "Please enter your current or most recent property."
+        phone.trim().length < 7 -> "Please enter a valid mobile number."
+        years == null || years !in 0L..60L -> "Please enter your years of experience (0–60)."
+        email.trim().isNotEmpty() && !email.contains("@") -> "Please enter a valid email address."
         else -> null
     }
 }

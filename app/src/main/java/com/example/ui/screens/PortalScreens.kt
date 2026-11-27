@@ -32,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.auth.CandidateAuthOutcome
 import com.example.auth.ClientAuthOutcome
 import com.example.auth.SupabaseAuthClient
 import com.example.auth.SupabaseCandidateSession
@@ -74,6 +73,7 @@ fun ClientLoginScreen(
     onBrowseHome: () -> Unit,
     onCommissionConsultation: (ConsultationServiceType) -> Unit,
     onGoToJobSeekerPortal: () -> Unit,
+    onSignOut: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -249,7 +249,7 @@ fun ClientLoginScreen(
             }
             item {
                 GoldOutlineButton(
-                    text = "Looking for Hospitality Careers? Job Seeker Login",
+                    text = "Looking for a Job? Open Job Seeker Profile",
                     onClick = onGoToJobSeekerPortal,
                     testTag = "switch_to_job_seeker_login",
                     modifier = Modifier.fillMaxWidth()
@@ -300,7 +300,11 @@ fun ClientLoginScreen(
                     displayNameOverride = initialProfileMetadata.fullName,
                     emailOverride = initialProfileMetadata.email,
                     onAdditionalSignOut = {
-                        scope.launch { supabaseAuthClient.signOut() }
+                        if (onSignOut != null) {
+                            onSignOut()
+                        } else {
+                            scope.launch { supabaseAuthClient.signOut() }
+                        }
                     }
                 )
             }
@@ -483,369 +487,207 @@ fun JobSeekerLoginScreen(
     onApplyRole: (HospitalityRole) -> Unit,
     onGoToClientPortal: () -> Unit,
     onSyncNotificationChannels: ((pushEnabled: Boolean, emailEnabled: Boolean) -> Unit)? = null,
+    onSignOut: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    val supabaseConfigured = remember(supabaseTalentClient) { supabaseTalentClient.isConfigured() }
-    val pendingDraft by supabaseTalentClient.pendingDraftCandidate.collectAsStateWithLifecycle()
-
-    var authMode by remember { mutableStateOf(JobSeekerAuthMode.LOGIN) }
     var isAuthBusy by remember { mutableStateOf(false) }
-    var resetStatusMessage by remember { mutableStateOf<String?>(null) }
-    var pendingNotice by remember { mutableStateOf<String?>(null) }
 
-    val isCandidateSignedIn = currentUser != null || supabaseCandidateSession != null
+    val candidateProfileState = viewModel?.candidateProfileState?.collectAsStateWithLifecycle()?.value
+    val applicationsState = viewModel?.applicationsState?.collectAsStateWithLifecycle()?.value
+    val savedRolesState = viewModel?.savedRolesState?.collectAsStateWithLifecycle()?.value
+    val notificationsState = viewModel?.jobNotificationsState?.collectAsStateWithLifecycle()?.value
+    val supabaseApps by supabaseTalentClient.myApplications.collectAsStateWithLifecycle()
+    val supabaseSaved by supabaseTalentClient.mySavedRoles.collectAsStateWithLifecycle()
+    val supabaseAlerts by supabaseTalentClient.myNotifications.collectAsStateWithLifecycle()
+    val isSaving = viewModel?.isSubmitting?.collectAsStateWithLifecycle()?.value ?: false
 
-    if (!isCandidateSignedIn) {
-        LazyColumn(
-            modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
-            item {
-                SectionHeading(
-                    eyebrow = "MILA Talent • Career Portal",
-                    title = when (authMode) {
-                        JobSeekerAuthMode.LOGIN -> "Job Seeker Login"
-                        JobSeekerAuthMode.REGISTER -> "Job Seeker Registration"
-                        JobSeekerAuthMode.RESET_PASSWORD -> "Reset Candidate Password"
-                    },
-                    subtitle = "Dedicated recruitment experience for hospitality leaders, chefs, mixologists, and opening specialists across India."
-                )
-            }
-            item {
-                JobSeekerAuthModeTabs(
-                    selectedMode = authMode,
-                    onSelectMode = {
-                        authMode = it
-                        pendingNotice = null
-                        resetStatusMessage = null
-                    }
-                )
-            }
+    val firestoreProfile = (candidateProfileState as? UiState.Success)?.data
+    val resolvedProfile = remember(firestoreProfile, supabaseCandidateSession, currentUser) {
+        when {
+            firestoreProfile != null -> firestoreProfile
+            supabaseCandidateSession != null -> supabaseCandidateSession.profile
+            else -> CandidateProfile(
+                userId = currentUser?.uid.orEmpty(),
+                fullName = currentUser?.displayName.orEmpty(),
+                email = currentUser?.email.orEmpty(),
+                jobAlertsEnabled = true
+            )
+        }
+    }
+    val activeUserId = currentUser?.uid?.takeIf { it.isNotBlank() }
+        ?: supabaseCandidateSession?.userId.orEmpty().ifBlank { "candidate_local" }
 
-            pendingNotice?.let { notice ->
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
-                        border = BorderStroke(1.dp, MilaEmerald),
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = notice,
-                            style = MaterialTheme.typography.bodySmall.copy(color = MilaIvory),
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
-                }
-            }
+    val unreadAlertsCount = remember(notificationsState, supabaseAlerts, currentUser) {
+        if (currentUser != null) {
+            (notificationsState as? UiState.Success)?.data?.count { !it.isRead } ?: 0
+        } else {
+            supabaseAlerts.count { !it.isRead }
+        }
+    }
+    var selectedSection by remember { mutableStateOf(CandidateSection.PROFILE_CV) }
 
-            item {
-                when (authMode) {
-                    JobSeekerAuthMode.LOGIN -> {
-                        JobSeekerPasswordLoginForm(
-                            isLoading = isAuthBusy,
-                            supabaseConfigured = supabaseConfigured,
-                            onLoginSubmit = { email, password ->
-                                scope.launch {
-                                    isAuthBusy = true
-                                    val outcome = supabaseTalentClient.signInCandidate(email, password)
-                                    isAuthBusy = false
-                                    when (outcome) {
-                                        is CandidateAuthOutcome.Authenticated -> {
-                                            onNotify(outcome.message)
-                                            onAuthSuccess()
-                                        }
-                                        is CandidateAuthOutcome.RequiresGoogleSyncOrSecrets -> {
-                                            pendingNotice = outcome.message
-                                        }
-                                        is CandidateAuthOutcome.PendingEmailVerification -> {
-                                            pendingNotice = outcome.message
-                                        }
-                                        is CandidateAuthOutcome.Failure -> {
-                                            onAuthError(outcome.message)
-                                        }
-                                    }
-                                }
-                            },
-                            onForgotPasswordClick = { authMode = JobSeekerAuthMode.RESET_PASSWORD }
-                        )
-                    }
-
-                    JobSeekerAuthMode.REGISTER -> {
-                        JobSeekerRegistrationForm(
-                            isLoading = isAuthBusy,
-                            supabaseConfigured = supabaseConfigured,
-                            onSubmitRegistration = { request ->
-                                scope.launch {
-                                    isAuthBusy = true
-                                    val outcome = supabaseTalentClient.signUpCandidate(request)
-                                    isAuthBusy = false
-                                    when (outcome) {
-                                        is CandidateAuthOutcome.Authenticated -> {
-                                            onNotify(outcome.message)
-                                            onAuthSuccess()
-                                        }
-                                        is CandidateAuthOutcome.PendingEmailVerification -> {
-                                            pendingNotice = outcome.message
-                                            authMode = JobSeekerAuthMode.LOGIN
-                                        }
-                                        is CandidateAuthOutcome.RequiresGoogleSyncOrSecrets -> {
-                                            pendingNotice = outcome.message
-                                        }
-                                        is CandidateAuthOutcome.Failure -> {
-                                            onAuthError(outcome.message)
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
-
-                    JobSeekerAuthMode.RESET_PASSWORD -> {
-                        JobSeekerPasswordResetForm(
-                            isLoading = isAuthBusy,
-                            statusMessage = resetStatusMessage,
-                            onResetSubmit = { email ->
-                                scope.launch {
-                                    isAuthBusy = true
-                                    val result = supabaseTalentClient.sendPasswordReset(email)
-                                    isAuthBusy = false
-                                    result.fold(
-                                        onSuccess = { msg ->
-                                            resetStatusMessage = msg
-                                            onNotify(msg)
-                                        },
-                                        onFailure = { err ->
-                                            onAuthError(err.localizedMessage ?: "Unable to request candidate password reset.")
-                                        }
-                                    )
-                                }
-                            },
-                            onBackToLogin = { authMode = JobSeekerAuthMode.LOGIN }
-                        )
-                    }
-                }
-            }
-
-            item {
-                AuthGateCard(
-                    title = if (pendingDraft != null) {
-                        "Activate Candidate Profile (${pendingDraft?.fullName})"
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            PortalUserHeader(
+                eyebrow = "MILA TALENT • JOB SEEKER PROFILE",
+                user = currentUser,
+                testTag = "job_seeker_sign_out_button",
+                displayNameOverride = resolvedProfile.fullName.ifBlank { "Job Seeker" },
+                emailOverride = resolvedProfile.mobileNumber.ifBlank {
+                    resolvedProfile.email.takeUnless { it.endsWith("@phone.mila.local", ignoreCase = true) }.orEmpty()
+                },
+                onAdditionalSignOut = {
+                    if (onSignOut != null) {
+                        onSignOut()
                     } else {
-                        "Quick Access With Google"
-                    },
-                    subtitle = if (pendingDraft != null) {
-                        "Continue with Google to save your 15-point hospitality profile, activate job alerts, and upload your private CV."
-                    } else {
-                        "Sign in securely with Google to manage your candidate profile, private CV vault, applications, and job alerts."
-                    },
-                    onAuthSuccess = onAuthSuccess,
-                    onAuthError = onAuthError
-                )
-            }
-            item {
-                PortalHighlightList(
-                    title = "MILA Talent Privacy & Recruitment Features",
-                    bullets = listOf(
-                        "Separate job seeker dossier with 15 executive hospitality profile fields",
-                        "Upload, replace, or delete PDF, DOC, or DOCX CVs in private storage (no public download links)",
-                        "Activate or pause job alerts and track live application stages"
-                    )
-                )
-            }
-            item {
-                GoldOutlineButton(
-                    text = "Hospitality Owner or Client? Switch to Client Login",
-                    onClick = onGoToClientPortal,
-                    testTag = "switch_to_client_login",
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-    } else {
-        val candidateProfileState = viewModel?.candidateProfileState?.collectAsStateWithLifecycle()?.value
-        val applicationsState = viewModel?.applicationsState?.collectAsStateWithLifecycle()?.value
-        val savedRolesState = viewModel?.savedRolesState?.collectAsStateWithLifecycle()?.value
-        val notificationsState = viewModel?.jobNotificationsState?.collectAsStateWithLifecycle()?.value
-        val supabaseApps by supabaseTalentClient.myApplications.collectAsStateWithLifecycle()
-        val supabaseSaved by supabaseTalentClient.mySavedRoles.collectAsStateWithLifecycle()
-        val supabaseAlerts by supabaseTalentClient.myNotifications.collectAsStateWithLifecycle()
-        val isSaving = viewModel?.isSubmitting?.collectAsStateWithLifecycle()?.value ?: false
-
-        val firestoreProfile = (candidateProfileState as? UiState.Success)?.data
-        val resolvedProfile = remember(firestoreProfile, supabaseCandidateSession, currentUser) {
-            when {
-                firestoreProfile != null -> firestoreProfile
-                supabaseCandidateSession != null -> supabaseCandidateSession.profile
-                else -> CandidateProfile(
-                    userId = currentUser?.uid.orEmpty(),
-                    fullName = currentUser?.displayName.orEmpty(),
-                    email = currentUser?.email.orEmpty(),
-                    jobAlertsEnabled = true
-                )
-            }
-        }
-        val activeUserId = currentUser?.uid?.takeIf { it.isNotBlank() }
-            ?: supabaseCandidateSession?.userId.orEmpty().ifBlank { "candidate_local" }
-
-        val unreadAlertsCount = remember(notificationsState, supabaseAlerts, currentUser) {
-            if (currentUser != null) {
-                (notificationsState as? UiState.Success)?.data?.count { !it.isRead } ?: 0
-            } else {
-                supabaseAlerts.count { !it.isRead }
-            }
-        }
-        var selectedSection by remember { mutableStateOf(CandidateSection.PROFILE_CV) }
-
-        LazyColumn(
-            modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item {
-                PortalUserHeader(
-                    eyebrow = "MILA TALENT • JOB SEEKER PORTAL",
-                    user = currentUser,
-                    testTag = "job_seeker_sign_out_button",
-                    displayNameOverride = resolvedProfile.fullName,
-                    emailOverride = resolvedProfile.email,
-                    onAdditionalSignOut = {
                         scope.launch { supabaseTalentClient.signOut() }
                     }
-                )
-            }
+                }
+            )
+        }
 
-            item {
-                GoldFilledButton(
-                    text = "I AM LOOKING FOR A JOB",
-                    onClick = onExploreCareers,
-                    testTag = "portal_primary_looking_for_job_button",
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        item {
+            GoldFilledButton(
+                text = "I AM LOOKING FOR A JOB",
+                onClick = onExploreCareers,
+                testTag = "portal_primary_looking_for_job_button",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(CandidateSection.entries) { section ->
-                        val selected = selectedSection == section
-                        val label = if (section == CandidateSection.NOTIFICATIONS && unreadAlertsCount > 0) {
-                            "Alerts ($unreadAlertsCount)"
-                        } else {
-                            section.label
-                        }
-                        FilterChip(
+        item {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(CandidateSection.entries) { section ->
+                    val selected = selectedSection == section
+                    val label = if (section == CandidateSection.NOTIFICATIONS && unreadAlertsCount > 0) {
+                        "Alerts ($unreadAlertsCount)"
+                    } else {
+                        section.label
+                    }
+                    FilterChip(
+                        selected = selected,
+                        onClick = { selectedSection = section },
+                        label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MilaChampagneGold,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = MilaCharcoalSurface,
+                            labelColor = MilaIvoryMuted
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
                             selected = selected,
-                            onClick = { selectedSection = section },
-                            label = { Text(label) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MilaChampagneGold,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                containerColor = MilaCharcoalSurface,
-                                labelColor = MilaIvoryMuted
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = selected,
-                                borderColor = MilaCharcoalBorder,
-                                selectedBorderColor = MilaChampagneGold
-                            ),
-                            modifier = Modifier.testTag("candidate_tab_${section.name}")
-                        )
-                    }
+                            borderColor = MilaCharcoalBorder,
+                            selectedBorderColor = MilaChampagneGold
+                        ),
+                        modifier = Modifier.testTag("candidate_tab_${section.name}")
+                    )
                 }
             }
+        }
 
-            when (selectedSection) {
-                CandidateSection.PROFILE_CV -> {
-                    item {
-                        IAmLookingForJobAlertsCard(
-                            profile = resolvedProfile,
-                            onToggleAlerts = { enabled ->
-                                val updated = resolvedProfile.copy(jobAlertsEnabled = enabled)
-                                if (viewModel != null && currentUser != null) {
-                                    viewModel.toggleJobAlerts(resolvedProfile, enabled)
-                                } else {
-                                    onNotify(if (enabled) "Job alerts activated." else "Job alerts paused.")
-                                }
-                                if (supabaseCandidateSession != null) {
-                                    scope.launch { supabaseTalentClient.syncCandidateProfile(updated) }
-                                }
-                            },
-                            onBrowseVacancies = onExploreCareers,
-                            onUpdateChannelPreferences = onSyncNotificationChannels
-                        )
-                    }
-
-                    item {
-                        PrivateCvVaultCard(
-                            userId = activeUserId,
-                            profile = resolvedProfile,
-                            supabaseTalentClient = supabaseTalentClient,
-                            onCvUploaded = { meta ->
-                                val updated = resolvedProfile.copy(
-                                    cvFileName = meta.fileName,
-                                    cvMimeType = meta.mimeType,
-                                    cvFileSizeBytes = meta.fileSizeBytes,
-                                    cvStoragePath = meta.storagePath,
-                                    cvUploadedAtMillis = meta.uploadedAtMillis
-                                )
-                                if (viewModel != null && currentUser != null) {
-                                    viewModel.attachCvToProfile(resolvedProfile, meta)
-                                } else {
-                                    onNotify("CV '${meta.fileName}' uploaded to private storage.")
-                                }
-                                if (supabaseCandidateSession != null) {
-                                    scope.launch { supabaseTalentClient.syncCandidateProfile(updated) }
-                                }
-                            },
-                            onCvDeleted = {
-                                val cleared = resolvedProfile.copy(
-                                    cvFileName = null,
-                                    cvMimeType = null,
-                                    cvFileSizeBytes = null,
-                                    cvStoragePath = null,
-                                    cvUploadedAtMillis = null
-                                )
-                                if (viewModel != null && currentUser != null) {
-                                    viewModel.removeCvFromProfile(resolvedProfile)
-                                } else {
-                                    onNotify("CV deleted from private storage.")
-                                }
-                                if (supabaseCandidateSession != null) {
-                                    scope.launch { supabaseTalentClient.syncCandidateProfile(cleared) }
-                                }
-                            },
-                            onError = onAuthError
-                        )
-                    }
-
-                    item {
-                        CandidateProfileEditorCard(
-                            initialProfile = resolvedProfile,
-                            isSaving = isSaving || isAuthBusy,
-                            onSaveProfile = { updated ->
-                                scope.launch {
-                                    isAuthBusy = true
-                                    if (supabaseCandidateSession != null) {
-                                        supabaseTalentClient.syncCandidateProfile(updated).onFailure { err ->
-                                            onAuthError(err.localizedMessage ?: "Failed to sync candidate profile to Supabase.")
-                                        }
-                                    }
-                                    if (viewModel != null && currentUser != null) {
-                                        viewModel.saveCandidateProfile(updated)
-                                    } else if (supabaseCandidateSession != null) {
-                                        onNotify("Candidate career dossier updated.")
-                                    }
-                                    isAuthBusy = false
-                                }
+        when (selectedSection) {
+            CandidateSection.PROFILE_CV -> {
+                item {
+                    PrivateCvVaultCard(
+                        userId = activeUserId,
+                        profile = resolvedProfile,
+                        supabaseTalentClient = supabaseTalentClient,
+                        onCvUploaded = { meta ->
+                            val updated = resolvedProfile.copy(
+                                cvFileName = meta.fileName,
+                                cvMimeType = meta.mimeType,
+                                cvFileSizeBytes = meta.fileSizeBytes,
+                                cvStoragePath = meta.storagePath,
+                                cvUploadedAtMillis = meta.uploadedAtMillis
+                            )
+                            if (viewModel != null && currentUser != null) {
+                                viewModel.attachCvToProfile(resolvedProfile, meta)
+                            } else {
+                                onNotify("CV '${meta.fileName}' uploaded successfully.")
                             }
-                        )
-                    }
+                            if (supabaseCandidateSession != null) {
+                                scope.launch { supabaseTalentClient.syncCandidateProfile(updated) }
+                            }
+                        },
+                        onCvDeleted = {
+                            val cleared = resolvedProfile.copy(
+                                cvFileName = null,
+                                cvMimeType = null,
+                                cvFileSizeBytes = null,
+                                cvStoragePath = null,
+                                cvUploadedAtMillis = null
+                            )
+                            if (viewModel != null && currentUser != null) {
+                                viewModel.removeCvFromProfile(resolvedProfile)
+                            } else {
+                                onNotify("CV removed.")
+                            }
+                            if (supabaseCandidateSession != null) {
+                                scope.launch { supabaseTalentClient.syncCandidateProfile(cleared) }
+                            }
+                        },
+                        onError = onAuthError
+                    )
                 }
+
+                item {
+                    CandidateProfileEditorCard(
+                        initialProfile = resolvedProfile,
+                        isSaving = isSaving || isAuthBusy,
+                        onSaveProfile = { updated ->
+                            scope.launch {
+                                isAuthBusy = true
+                                val fallbackEmail = updated.email.ifBlank {
+                                    supabaseCandidateSession?.email?.ifBlank { null }
+                                        ?: currentUser?.email?.ifBlank { null }
+                                        ?: "${updated.mobileNumber.filter { it.isDigit() }.ifBlank { "member" }}@phone.mila.local"
+                                }
+                                val profileToSave = updated.copy(email = fallbackEmail)
+                                var syncFailed = false
+                                if (supabaseCandidateSession != null) {
+                                    supabaseTalentClient.syncCandidateProfile(profileToSave).onFailure { err ->
+                                        syncFailed = true
+                                        onAuthError(err.localizedMessage ?: "Failed to save profile.")
+                                    }
+                                }
+                                if (viewModel != null && currentUser != null) {
+                                    viewModel.saveCandidateProfile(profileToSave)
+                                } else if (!syncFailed) {
+                                    onNotify("Profile & experience saved.")
+                                }
+                                isAuthBusy = false
+                            }
+                        }
+                    )
+                }
+
+                item {
+                    IAmLookingForJobAlertsCard(
+                        profile = resolvedProfile,
+                        onToggleAlerts = { enabled ->
+                            val updated = resolvedProfile.copy(jobAlertsEnabled = enabled)
+                            if (viewModel != null && currentUser != null) {
+                                viewModel.toggleJobAlerts(resolvedProfile, enabled)
+                            } else {
+                                onNotify(if (enabled) "Job alerts activated." else "Job alerts paused.")
+                            }
+                            if (supabaseCandidateSession != null) {
+                                scope.launch { supabaseTalentClient.syncCandidateProfile(updated) }
+                            }
+                        },
+                        onBrowseVacancies = onExploreCareers,
+                        onUpdateChannelPreferences = onSyncNotificationChannels
+                    )
+                }
+            }
 
                 CandidateSection.APPLICATIONS_SAVED -> {
                     item {
@@ -1072,7 +914,6 @@ fun JobSeekerLoginScreen(
                                 )
                             }
                         }
-                    }
                 }
             }
         }

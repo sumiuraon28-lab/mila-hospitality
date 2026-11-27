@@ -34,6 +34,7 @@ import com.example.data.AdminModule
 import com.example.data.AdminRole
 import com.example.data.AdminUser
 import com.example.data.RealAnalyticsSnapshot
+import com.example.ui.components.GoldFilledButton
 import com.example.ui.components.GoldOutlineButton
 import com.example.ui.components.StatusPill
 import com.example.ui.components.StatusTone
@@ -130,6 +131,36 @@ fun AdminDashboardOverviewModule(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         AdminKpiTile("${analytics.publishedServicesCount}/${analytics.totalServicesCount}", "Services Live", "Consultancy pages", Modifier.weight(1f))
                         AdminKpiTile("${analytics.publishedPortfolioCount}", "Portfolio", "${analytics.publishedTestimonialsCount} testimonials", Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        if (role.canMutate(AdminModule.JOB_VACANCY_MANAGEMENT)) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MilaCharcoalElevated),
+                    border = BorderStroke(1.dp, MilaGoldMuted),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "JOB POSTINGS • MILA ADMIN ONLY",
+                            style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold, letterSpacing = 1.4.sp)
+                        )
+                        Text(
+                            text = "Only MILA Admin can post, edit, publish, or delete hospitality jobs (${analytics.publishedVacanciesCount} live / ${analytics.totalVacanciesCount} total).",
+                            style = MaterialTheme.typography.bodySmall.copy(color = MilaIvoryMuted)
+                        )
+                        GoldFilledButton(
+                            text = "Post, Edit & Delete Jobs",
+                            onClick = { onSelectModule(AdminModule.JOB_VACANCY_MANAGEMENT) },
+                            testTag = "dash_manage_jobs_button",
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }

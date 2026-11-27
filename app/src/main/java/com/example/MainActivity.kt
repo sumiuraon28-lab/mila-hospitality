@@ -178,7 +178,7 @@ private val allPagesDirectory = listOf(
     DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/hospitality-management-solutions", "08. Management Solutions", "8 Service Categories", Icons.Outlined.Apartment),
     DrawerNavEntry(ROUTE_CONTACT, "Contact Us", "Connect & Portals", Icons.Outlined.ContactMail),
     DrawerNavEntry(ROUTE_CLIENT_LOGIN, "Client Login", "Connect & Portals", Icons.AutoMirrored.Outlined.Login),
-    DrawerNavEntry(ROUTE_JOB_SEEKER_LOGIN, "Job Seeker Login", "Connect & Portals", Icons.Outlined.PersonSearch)
+    DrawerNavEntry(ROUTE_JOB_SEEKER_LOGIN, "Job Seeker Profile & CV", "Connect & Portals", Icons.Outlined.PersonSearch)
 )
 
 class MainActivity : ComponentActivity() {
@@ -228,6 +228,13 @@ fun MilaAppRoot() {
         )
     }
 
+    LaunchedEffect(supabaseSession?.userId, supabaseSession?.accessToken) {
+        val active = supabaseSession
+        if (active != null) {
+            supabaseTalentClient.syncFromAuthSession(active)
+        }
+    }
+
     val catalogViewModel: ServiceCatalogViewModel = viewModel(
         factory = viewModelFactory {
             initializer {
@@ -242,6 +249,7 @@ fun MilaAppRoot() {
     )
     val services by catalogViewModel.services.collectAsStateWithLifecycle()
     val vacancies by catalogViewModel.vacancies.collectAsStateWithLifecycle()
+    val isRefreshingVacancies by catalogViewModel.isRefreshingVacancies.collectAsStateWithLifecycle()
     val portfolio by catalogViewModel.portfolio.collectAsStateWithLifecycle()
     val testimonials by catalogViewModel.testimonials.collectAsStateWithLifecycle()
 
@@ -313,6 +321,8 @@ fun MilaAppRoot() {
                     supabaseTalentClient = supabaseTalentClient,
                     services = services,
                     vacancies = vacancies,
+                    isRefreshingVacancies = isRefreshingVacancies,
+                    onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                     portfolio = portfolio,
                     testimonials = testimonials,
                     onSignOut = handleMemberSignOut,
@@ -328,6 +338,8 @@ fun MilaAppRoot() {
                 supabaseTalentClient = supabaseTalentClient,
                 services = services,
                 vacancies = vacancies,
+                isRefreshingVacancies = isRefreshingVacancies,
+                onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                 portfolio = portfolio,
                 testimonials = testimonials,
                 onSignOut = handleMemberSignOut,
@@ -347,6 +359,8 @@ private fun MilaAppShell(
     supabaseTalentClient: SupabaseTalentClient,
     services: List<ConsultancyService>,
     vacancies: List<HospitalityRole>,
+    isRefreshingVacancies: Boolean,
+    onRefreshVacancies: () -> Unit,
     portfolio: List<CaseStudy>,
     testimonials: List<Testimonial>,
     onSignOut: () -> Unit,
@@ -643,6 +657,9 @@ private fun MilaAppShell(
                                 )
                             }
                             composable(ROUTE_CAREERS) {
+                                LaunchedEffect(Unit) {
+                                    onRefreshVacancies()
+                                }
                                 TalentScreen(
                                     savedRoleIds = savedRoleIds,
                                     appliedRoleIds = appliedRoleIds,
@@ -654,8 +671,11 @@ private fun MilaAppShell(
                                                     scope.launch { supabaseTalentClient.toggleSavedJob(role, currentlySaved) }
                                                 }
                                             }
-                                            supabaseCandidateSession != null -> {
+                                            supabaseCandidateSession != null || supabaseSession != null -> {
                                                 scope.launch {
+                                                    if (supabaseCandidateSession == null && supabaseSession != null) {
+                                                        supabaseTalentClient.syncFromAuthSession(supabaseSession)
+                                                    }
                                                     supabaseTalentClient.toggleSavedJob(role, currentlySaved).fold(
                                                         onSuccess = {
                                                             snackbarHostState.showSnackbar(
@@ -682,7 +702,9 @@ private fun MilaAppShell(
                                     },
                                     onOpenJobSeekerPortal = { navigateToRoute(ROUTE_JOB_SEEKER_LOGIN) },
                                     jobAlertsEnabled = (candidateProfile ?: supabaseCandidateSession?.profile)?.jobAlertsEnabled == true,
-                                    roles = vacancies
+                                    roles = vacancies,
+                                    isRefreshing = isRefreshingVacancies,
+                                    onRefreshRoles = onRefreshVacancies
                                 )
                             }
                             composable(ROUTE_CONTACT) {
@@ -749,7 +771,8 @@ private fun MilaAppShell(
                                     onCommissionConsultation = { serviceType ->
                                         consultationSheetType = serviceType
                                     },
-                                    onGoToJobSeekerPortal = { navigateToRoute(ROUTE_JOB_SEEKER_LOGIN) }
+                                    onGoToJobSeekerPortal = { navigateToRoute(ROUTE_JOB_SEEKER_LOGIN) },
+                                    onSignOut = onSignOut
                                 )
                             }
                             composable(ROUTE_JOB_SEEKER_LOGIN) {
@@ -785,7 +808,8 @@ private fun MilaAppShell(
                                                 "Alert channels saved (Push: ${if (pushEnabled) "On" else "Off"}, Email: ${if (emailEnabled) "On" else "Off"})."
                                             )
                                         }
-                                    }
+                                    },
+                                    onSignOut = onSignOut
                                 )
                             }
                         }
@@ -881,9 +905,12 @@ private fun MilaAppShell(
                             applyingRole = null
                             navigateToRoute(ROUTE_JOB_SEEKER_LOGIN)
                         }
-                    } else if (supabaseCandidateSession != null) {
+                    } else if (supabaseCandidateSession != null || supabaseSession != null) {
                         scope.launch {
                             isSupabaseSubmitting = true
+                            if (supabaseCandidateSession == null && supabaseSession != null) {
+                                supabaseTalentClient.syncFromAuthSession(supabaseSession)
+                            }
                             val res = supabaseTalentClient.syncJobApplication(application)
                             isSupabaseSubmitting = false
                             res.fold(
@@ -900,7 +927,28 @@ private fun MilaAppShell(
                     }
                 },
                 candidateProfile = candidateProfile,
-                supabaseCandidateSession = supabaseCandidateSession
+                supabaseCandidateSession = supabaseCandidateSession,
+                supabaseSession = supabaseSession,
+                supabaseTalentClient = supabaseTalentClient,
+                onCvUploaded = { meta ->
+                    val baseProfile = candidateProfile ?: supabaseCandidateSession?.profile
+                    if (baseProfile != null) {
+                        val updated = baseProfile.copy(
+                            cvFileName = meta.fileName,
+                            cvMimeType = meta.mimeType,
+                            cvFileSizeBytes = meta.fileSizeBytes,
+                            cvStoragePath = meta.storagePath,
+                            cvUploadedAtMillis = meta.uploadedAtMillis
+                        )
+                        if (mandatesViewModel != null && currentUser != null) {
+                            mandatesViewModel.attachCvToProfile(baseProfile, meta)
+                        }
+                        if (supabaseCandidateSession != null) {
+                            scope.launch { supabaseTalentClient.syncCandidateProfile(updated) }
+                        }
+                    }
+                    scope.launch { snackbarHostState.showSnackbar("CV '${meta.fileName}' attached.") }
+                }
             )
         }
     }

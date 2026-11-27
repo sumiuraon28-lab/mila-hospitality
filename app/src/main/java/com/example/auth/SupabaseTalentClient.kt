@@ -197,6 +197,61 @@ class SupabaseTalentClient(
         _pendingDraftCandidate.value = null
     }
 
+    /**
+     * Bridges an authenticated Supabase client/Phone-OTP session into the MILA Talent
+     * session so signed-in users can apply for roles, shortlist vacancies, and manage
+     * their candidate profile without being asked to sign in a second time.
+     */
+    suspend fun syncFromAuthSession(authSession: SupabaseSession) {
+        val existing = _session.value
+        if (existing != null &&
+            existing.userId == authSession.userId &&
+            existing.accessToken == authSession.accessToken
+        ) {
+            return
+        }
+
+        val cleanName = authSession.metadata.fullName
+            .takeIf { it.isNotBlank() && !it.equals("MILA Guest", ignoreCase = true) }
+            .orEmpty()
+        val cleanEmail = authSession.email
+            .takeIf { it.isNotBlank() && !it.endsWith("@phone.mila.local", ignoreCase = true) }
+            .orEmpty()
+        val cleanCity = authSession.metadata.city
+            .takeIf { it.isNotBlank() && !it.equals("India", ignoreCase = true) }
+            .orEmpty()
+
+        val initialProfile = CandidateProfile(
+            userId = authSession.userId,
+            fullName = cleanName,
+            email = cleanEmail,
+            mobileNumber = authSession.metadata.mobileNumber,
+            location = cleanCity,
+            jobAlertsEnabled = true
+        )
+
+        val bridged = SupabaseCandidateSession(
+            accessToken = authSession.accessToken,
+            refreshToken = authSession.refreshToken,
+            userId = authSession.userId,
+            email = cleanEmail.ifBlank { authSession.email },
+            profile = initialProfile
+        )
+        _session.value = bridged
+
+        if (!isConfigured()) return
+        withContext(Dispatchers.IO) {
+            val remoteProfile = dbClient.fetchCandidateProfile(authSession.accessToken, authSession.userId).getOrNull()
+            if (remoteProfile != null) {
+                _session.value = bridged.copy(
+                    email = remoteProfile.email.ifBlank { bridged.email },
+                    profile = remoteProfile
+                )
+            }
+            refreshCandidatePortalData()
+        }
+    }
+
     suspend fun signUpCandidate(request: CandidateRegistrationRequest): CandidateAuthOutcome {
         CandidateValidator.validateRegistration(request)?.let { err ->
             return CandidateAuthOutcome.Failure(err)
