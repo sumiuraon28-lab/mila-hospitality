@@ -680,7 +680,7 @@ fun EnquiryConfirmationDialog(
 }
 
 @Composable
-private fun ClientTextField(
+internal fun ClientTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,

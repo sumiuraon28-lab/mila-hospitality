@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material3.Card
@@ -84,6 +85,7 @@ fun MilaAuthEntryScreen(
     supabaseAuthClient: SupabaseAuthClient,
     @Suppress("UNUSED_PARAMETER") supabaseTalentClient: SupabaseTalentClient
 ) {
+    var nameInput by remember { mutableStateOf("") }
     var mobileInput by remember { mutableStateOf("") }
     var otpCode by remember { mutableStateOf("") }
     var otpSentToPhone by remember { mutableStateOf<String?>(null) }
@@ -273,7 +275,7 @@ fun MilaAuthEntryScreen(
 
                             Text(
                                 text = if (otpSentToPhone == null) {
-                                    "Enter Mobile Number to Start"
+                                    "Enter Your Name & Number"
                                 } else {
                                     "Enter Verification Code"
                                 },
@@ -282,7 +284,7 @@ fun MilaAuthEntryScreen(
 
                             Text(
                                 text = if (otpSentToPhone == null) {
-                                    "Enter your mobile number to receive a 6-digit OTP, or continue with Google."
+                                    "No registration needed — just verify your mobile number with OTP to open, explore, and request services."
                                 } else {
                                     "We sent a 6-digit verification code to $otpSentToPhone."
                                 },
@@ -290,6 +292,31 @@ fun MilaAuthEntryScreen(
                             )
 
                             if (otpSentToPhone == null) {
+                                OutlinedTextField(
+                                    value = nameInput,
+                                    onValueChange = { input ->
+                                        if (input.length <= 80) {
+                                            nameInput = input
+                                            inlineError = null
+                                        }
+                                    },
+                                    label = { Text("Your Name *", color = MilaWarmStone) },
+                                    placeholder = { Text("e.g., Rahul Sharma", color = MilaWarmStone) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Person,
+                                            contentDescription = null,
+                                            tint = MilaChampagneGold
+                                        )
+                                    },
+                                    singleLine = true,
+                                    colors = milaFieldColors(),
+                                    shape = MaterialTheme.shapes.small,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("otp_full_name_input")
+                                )
+
                                 OutlinedTextField(
                                     value = mobileInput,
                                     onValueChange = { input ->
@@ -414,6 +441,10 @@ fun MilaAuthEntryScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     if (otpSentToPhone == null) {
+                                        if (nameInput.trim().length < 2) {
+                                            inlineError = "Please enter your name."
+                                            return@GoldFilledButton
+                                        }
                                         val normalized = SupabaseAuthValidator.normalizePhoneE164(mobileInput)
                                         if (normalized == null) {
                                             inlineError = "Please enter a valid 10-digit mobile number."
@@ -422,7 +453,7 @@ fun MilaAuthEntryScreen(
                                         scope.launch {
                                             inlineError = null
                                             isBusy = true
-                                            val result = supabaseAuthClient.sendPhoneOtp(normalized)
+                                            val result = supabaseAuthClient.sendPhoneOtp(normalized, nameInput.trim())
                                             isBusy = false
                                             result.fold(
                                                 onSuccess = { sentPhone ->
@@ -448,7 +479,10 @@ fun MilaAuthEntryScreen(
                                             val result = supabaseAuthClient.verifyPhoneOtp(targetPhone, otpCode)
                                             result.fold(
                                                 onSuccess = { verified ->
-                                                    supabaseAuthClient.activatePhoneOtpSession(verified)
+                                                    supabaseAuthClient.activatePhoneOtpSession(
+                                                        verifiedPhone = verified,
+                                                        enteredFullName = nameInput.trim()
+                                                    )
                                                     isBusy = false
                                                 },
                                                 onFailure = { err ->

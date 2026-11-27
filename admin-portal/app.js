@@ -71,9 +71,11 @@
     statusFilter: "ALL",
     liveSyncEnabled: true,
     knownEnquiryIds: new Set(),
+    knownUserIds: new Set(),
     hasInitialSync: false,
     pollTimer: null,
     data: {
+      users: [],
       clients: [],
       enquiries: [],
       services: [],
@@ -130,6 +132,7 @@
 
   const MODULES = [
     { id: "overview", label: "Dashboard Overview", group: "Executive", roles: ["SUPER_ADMIN", "CONSULTANT", "RECRUITMENT_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"] },
+    { id: "users", label: "Logged-In App Users", group: "Client Operations", roles: ["SUPER_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN"] },
     { id: "clients", label: "Client Management", group: "Client Operations", roles: ["SUPER_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN"] },
     { id: "enquiries", label: "Service Enquiries", group: "Client Operations", roles: ["SUPER_ADMIN", "CONSULTANT", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONSULTANT"] },
     { id: "vacancies", label: "Job Vacancies", group: "Recruitment & Talent", roles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "RECRUITMENT_ADMIN"] },
@@ -467,6 +470,7 @@
 
       state.activeModule = "overview";
       state.knownEnquiryIds = new Set();
+      state.knownUserIds = new Set();
       state.hasInitialSync = false;
       await refreshAllData(false, false);
       startLiveSyncPolling();
@@ -493,6 +497,7 @@
     state.token = null;
     state.admin = null;
     state.knownEnquiryIds = new Set();
+    state.knownUserIds = new Set();
     state.hasInitialSync = false;
     Object.keys(state.data).forEach((k) => {
       state.data[k] = Array.isArray(state.data[k]) ? [] : null;
@@ -530,7 +535,8 @@
         safeFetchList("/rest/v1/activity_logs?order=created_at.desc&limit=100").then((r) => (state.data.logs = r))
       ];
       if (["SUPER_ADMIN", "REPORTING_ADMIN"].includes(role)) {
-        tasks.push(safeFetchList("/rest/v1/client_profiles?order=created_at.desc").then((r) => (state.data.clients = r)));
+        tasks.push(safeFetchList("/rest/v1/user_profiles?order=updated_at.desc").then((r) => (state.data.users = r)));
+        tasks.push(safeFetchList("/rest/v1/client_profiles?order=updated_at.desc").then((r) => (state.data.clients = r)));
         tasks.push(safeFetchList("/rest/v1/admin_users?order=created_at.desc").then((r) => (state.data.admins = r)));
         tasks.push(safeFetchList("/rest/v1/platform_settings?id=eq.platform&limit=1").then((r) => (state.data.settings = r[0] || null)));
       }
@@ -555,17 +561,25 @@
       }
       await Promise.all(tasks);
 
-      // Detect newly arrived client enquiries during live sync
+      // Detect newly arrived client enquiries or new app logins during live sync
       const incomingEnquiries = state.data.enquiries || [];
+      const incomingUsers = buildAppUsersDirectory();
       if (state.hasInitialSync) {
         const brandNew = incomingEnquiries.filter((e) => e.id && !state.knownEnquiryIds.has(e.id));
         if (brandNew.length > 0) {
           const newest = brandNew[0];
           const refLabel = newest.reference_code ? " (" + newest.reference_code + ")" : "";
           showToast("New client enquiry received: " + (newest.property_name || "New Enquiry") + refLabel);
+        } else {
+          const brandNewUsers = incomingUsers.filter((u) => u.userId && !state.knownUserIds.has(u.userId));
+          if (brandNewUsers.length > 0) {
+            const u = brandNewUsers[0];
+            showToast("New app user logged in: " + u.fullName + (u.mobileNumber ? " (" + u.mobileNumber + ")" : ""));
+          }
         }
       }
       state.knownEnquiryIds = new Set(incomingEnquiries.map((e) => e.id).filter(Boolean));
+      state.knownUserIds = new Set(incomingUsers.map((u) => u.userId).filter(Boolean));
       state.hasInitialSync = true;
 
       renderSidebar();
@@ -635,10 +649,140 @@
     return select;
   }
 
+  function isPlaceholderName(name) {
+    const n = String(name || "").trim().toLowerCase();
+    return !n || n === "mila guest" || n === "mila member" || n === "mila client" || n === "unnamed";
+  }
+
+  function isSyntheticPhoneEmail(email) {
+    return String(email || "").trim().toLowerCase().endsWith("@phone.mila.local");
+  }
+
+  function buildAppUsersDirectory() {
+    const d = state.data;
+    const byId = new Map();
+    const adminEmails = new Set((d.admins || []).map((a) => String(a.email || "").toLowerCase()));
+    const adminUids = new Set((d.admins || []).map((a) => a.user_id).filter(Boolean));
+
+    const ensureEntry = (uid) => {
+      if (!byId.has(uid)) {
+        byId.set(uid, {
+          userId: uid,
+          fullName: "",
+          mobileNumber: "",
+          email: "",
+          accountType: "CLIENT",
+          loginMethod: "Email / Google",
+          city: "",
+          companyName: "",
+          designation: "",
+          hasCv: false,
+          cvFileName: "",
+          enquiriesCount: 0,
+          applicationsCount: 0,
+          createdAt: "",
+          lastActiveAt: "",
+          clientRow: null,
+          candidateRow: null,
+          isAdmin: false
+        });
+      }
+      return byId.get(uid);
+    };
+
+    (d.users || []).forEach((u) => {
+      if (!u.id) return;
+      const entry = ensureEntry(u.id);
+      if (!isPlaceholderName(u.full_name)) entry.fullName = u.full_name.trim();
+      else if (!entry.fullName && u.full_name) entry.fullName = u.full_name.trim();
+      if (u.mobile_number && u.mobile_number !== "Not Provided") entry.mobileNumber = u.mobile_number.trim();
+      if (u.email) {
+        if (isSyntheticPhoneEmail(u.email)) {
+          entry.loginMethod = "Phone OTP";
+        } else {
+          entry.email = u.email.trim();
+        }
+      }
+      entry.accountType = u.account_type || entry.accountType;
+      entry.createdAt = u.created_at || entry.createdAt;
+      entry.lastActiveAt = u.updated_at || u.created_at || entry.lastActiveAt;
+      if (u.account_type === "ADMIN" || adminUids.has(u.id) || adminEmails.has(String(u.email || "").toLowerCase())) {
+        entry.isAdmin = true;
+      }
+    });
+
+    (d.clients || []).forEach((c) => {
+      const uid = c.user_id || c.id;
+      if (!uid) return;
+      const entry = ensureEntry(uid);
+      entry.clientRow = c;
+      if (isPlaceholderName(entry.fullName) && !isPlaceholderName(c.full_name)) entry.fullName = c.full_name.trim();
+      if (!entry.mobileNumber && c.mobile_number && c.mobile_number !== "Not Provided") entry.mobileNumber = c.mobile_number.trim();
+      if (!entry.email && c.email && !isSyntheticPhoneEmail(c.email)) entry.email = c.email.trim();
+      if (isSyntheticPhoneEmail(c.email)) entry.loginMethod = "Phone OTP";
+      if (c.city && c.city !== "India") entry.city = c.city;
+      if (c.company_name && c.company_name !== "MILA Hospitality Member") entry.companyName = c.company_name;
+      if (c.designation && c.designation !== "Client") entry.designation = c.designation;
+      if (!entry.createdAt && c.created_at) entry.createdAt = c.created_at;
+      const ts = c.updated_at || c.created_at || "";
+      if (ts && (!entry.lastActiveAt || ts > entry.lastActiveAt)) entry.lastActiveAt = ts;
+    });
+
+    (d.candidates || []).forEach((cand) => {
+      const uid = cand.user_id || cand.id;
+      if (!uid) return;
+      const entry = ensureEntry(uid);
+      entry.candidateRow = cand;
+      if (isPlaceholderName(entry.fullName) && !isPlaceholderName(cand.full_name)) entry.fullName = cand.full_name.trim();
+      if (!entry.mobileNumber && cand.mobile_number && cand.mobile_number !== "Not Provided") entry.mobileNumber = cand.mobile_number.trim();
+      if (!entry.email && cand.email && !isSyntheticPhoneEmail(cand.email)) entry.email = cand.email.trim();
+      if (cand.cv_file_name && cand.cv_storage_path) {
+        entry.hasCv = true;
+        entry.cvFileName = cand.cv_file_name;
+      }
+      if (!entry.city && cand.location) entry.city = cand.location;
+      const ts = cand.updated_at || cand.created_at || "";
+      if (ts && (!entry.lastActiveAt || ts > entry.lastActiveAt)) entry.lastActiveAt = ts;
+    });
+
+    (d.enquiries || []).forEach((enq) => {
+      if (!enq.user_id) return;
+      const entry = ensureEntry(enq.user_id);
+      entry.enquiriesCount += 1;
+      if (isPlaceholderName(entry.fullName) && !isPlaceholderName(enq.contact_name)) entry.fullName = enq.contact_name.trim();
+      if (!entry.mobileNumber && enq.contact_phone) entry.mobileNumber = enq.contact_phone.trim();
+      if (!entry.email && enq.contact_email && !isSyntheticPhoneEmail(enq.contact_email)) entry.email = enq.contact_email.trim();
+      const ts = enq.created_at || "";
+      if (ts && (!entry.lastActiveAt || ts > entry.lastActiveAt)) entry.lastActiveAt = ts;
+    });
+
+    (d.applications || []).forEach((app) => {
+      if (!app.user_id) return;
+      const entry = ensureEntry(app.user_id);
+      entry.applicationsCount += 1;
+      if (isPlaceholderName(entry.fullName) && !isPlaceholderName(app.candidate_name)) entry.fullName = app.candidate_name.trim();
+      if (!entry.mobileNumber && app.candidate_phone) entry.mobileNumber = app.candidate_phone.trim();
+      if (!entry.email && app.candidate_email && !isSyntheticPhoneEmail(app.candidate_email)) entry.email = app.candidate_email.trim();
+      const ts = app.created_at || "";
+      if (ts && (!entry.lastActiveAt || ts > entry.lastActiveAt)) entry.lastActiveAt = ts;
+    });
+
+    return Array.from(byId.values())
+      .filter((u) => !u.isAdmin)
+      .map((u) => {
+        if (!u.fullName || isPlaceholderName(u.fullName)) {
+          u.fullName = u.mobileNumber ? "App Member (" + u.mobileNumber + ")" : (u.email || "MILA App User");
+        }
+        return u;
+      })
+      .sort((a, b) => String(b.lastActiveAt || b.createdAt || "").localeCompare(String(a.lastActiveAt || a.createdAt || "")));
+  }
+
   // Sidebar Rendering
   function moduleCount(id) {
     const d = state.data;
     switch (id) {
+      case "users": return buildAppUsersDirectory().length;
       case "clients": return d.clients.length;
       case "enquiries": return d.enquiries.length;
       case "vacancies": return d.vacancies.length;
@@ -757,8 +901,9 @@
       )
     );
 
+    const appUsers = buildAppUsersDirectory();
     const kpis = [
-      { label: "Registered Clients", value: d.clients.length, mod: "clients" },
+      { label: "Logged-In App Users", value: appUsers.length, mod: "users" },
       { label: "Service Enquiries", value: d.enquiries.length, mod: "enquiries" },
       { label: "Open Job Vacancies", value: d.vacancies.filter((v) => v.published).length + " / " + d.vacancies.length, mod: "vacancies" },
       { label: "Candidate Profiles", value: d.candidates.length, mod: "candidates" },
@@ -796,6 +941,47 @@
       );
     });
     container.appendChild(grid);
+
+    if (["SUPER_ADMIN", "REPORTING_ADMIN"].includes(state.admin.role)) {
+      container.appendChild(
+        el("div", { className: "module-header", style: "margin-top:16px;margin-bottom:10px;" }, [
+          el("div", null, [
+            el("h3", { className: "serif", text: "Logged-In App Users (Name & Mobile)" }),
+            el("p", {
+              className: "record-small",
+              text: "Everyone currently logged in and using the MILA app, sorted by latest activity."
+            })
+          ]),
+          el("button", {
+            className: "btn btn-outline btn-sm",
+            type: "button",
+            text: "View All App Users (" + appUsers.length + ")",
+            onClick: () => {
+              state.activeModule = "users";
+              state.searchQuery = "";
+              state.statusFilter = "ALL";
+              renderSidebar();
+              renderActiveModule();
+            }
+          })
+        ])
+      );
+
+      const usersList = el("div", { className: "records-list", style: "margin-bottom:18px;" });
+      if (!appUsers.length) {
+        usersList.appendChild(
+          el("div", {
+            className: "empty-state",
+            text: "No app users logged in yet. As soon as someone signs in with OTP or Google, their Name and Mobile Number will appear here."
+          })
+        );
+      } else {
+        appUsers.slice(0, 6).forEach((u) => {
+          usersList.appendChild(buildAppUserCard(u, canWrite("users")));
+        });
+      }
+      container.appendChild(usersList);
+    }
 
     if (["SUPER_ADMIN", "RECRUITMENT_ADMIN", "REPORTING_ADMIN"].includes(state.admin.role)) {
       const jobsActions = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" }, [
@@ -918,18 +1104,133 @@
     container.appendChild(list);
   }
 
+  function buildAppUserCard(user, writable) {
+    const activityBits = [];
+    if (user.enquiriesCount > 0) activityBits.push(user.enquiriesCount + (user.enquiriesCount === 1 ? " Service Enquiry" : " Service Enquiries"));
+    if (user.applicationsCount > 0) activityBits.push(user.applicationsCount + (user.applicationsCount === 1 ? " Job Application" : " Job Applications"));
+    if (user.hasCv) activityBits.push("CV Uploaded");
+    const activityText = activityBits.length ? activityBits.join(" • ") : "Exploring App";
+
+    const actions = [];
+    if (user.mobileNumber) {
+      actions.push(
+        el("a", {
+          className: "btn btn-gold btn-sm",
+          href: "tel:" + user.mobileNumber.replace(/[^\d+]/g, ""),
+          style: "text-decoration:none;display:inline-flex;align-items:center;",
+          text: "Call " + user.mobileNumber
+        })
+      );
+    }
+    if (user.hasCv && user.candidateRow) {
+      actions.push(
+        el("button", {
+          className: "btn btn-outline btn-sm",
+          type: "button",
+          text: "Download CV",
+          onClick: () => downloadCandidateCv(user.candidateRow)
+        })
+      );
+    }
+    if (writable && user.clientRow) {
+      actions.push(
+        el("button", {
+          className: "btn btn-outline btn-sm",
+          type: "button",
+          text: "Edit Name / Number",
+          onClick: () => openEditClientModal(user.clientRow)
+        })
+      );
+    }
+
+    return el("div", { className: "record-card" }, [
+      el("div", { className: "record-top" }, [
+        el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
+          pill(user.loginMethod, user.loginMethod === "Phone OTP" ? "emerald" : "gold"),
+          user.enquiriesCount > 0 ? pill(user.enquiriesCount + " Enquiries", "gold") : null,
+          user.hasCv ? pill("CV Ready", "emerald") : null
+        ]),
+        user.lastActiveAt
+          ? el("span", { className: "record-small", text: "Last Active: " + formatTimestamp(user.lastActiveAt) })
+          : null
+      ]),
+      el("div", { className: "record-title", text: user.fullName }),
+      el("div", {
+        className: "record-sub",
+        text: "Mobile: " + (user.mobileNumber || "Not provided") + (user.email ? " • " + user.email : "")
+      }),
+      el("div", {
+        className: "record-meta",
+        text:
+          "Activity: " +
+          activityText +
+          (user.city ? " • " + user.city : "") +
+          (user.createdAt ? " • Joined " + formatTimestamp(user.createdAt) : "")
+      }),
+      actions.length ? el("div", { className: "record-actions" }, actions) : null
+    ]);
+  }
+
+  function renderAppUsers(container) {
+    const writable = canWrite("users");
+    const allUsers = buildAppUsersDirectory();
+    container.appendChild(
+      renderModuleHeader(
+        "Logged-In App Users",
+        "Live directory of everyone logged in and using the MILA Hospitality app — with Name, Mobile Number, last active time, and enquiry/job activity (" + allUsers.length + " total)."
+      )
+    );
+    container.appendChild(
+      renderSearchBar("Search by name, mobile number, email, or city...", ["PHONE_OTP", "WITH_ENQUIRIES", "JOB_SEEKERS"])
+    );
+
+    const q = state.searchQuery.trim().toLowerCase();
+    const rows = allUsers.filter((u) => {
+      const matchFilter =
+        state.statusFilter === "ALL" ||
+        (state.statusFilter === "PHONE_OTP" && u.loginMethod === "Phone OTP") ||
+        (state.statusFilter === "WITH_ENQUIRIES" && u.enquiriesCount > 0) ||
+        (state.statusFilter === "JOB_SEEKERS" && (u.applicationsCount > 0 || u.hasCv || Boolean(u.candidateRow)));
+      const matchQ =
+        !q ||
+        (u.fullName || "").toLowerCase().includes(q) ||
+        (u.mobileNumber || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q) ||
+        (u.city || "").toLowerCase().includes(q);
+      return matchFilter && matchQ;
+    });
+
+    const list = el("div", { className: "records-list" });
+    if (!rows.length) {
+      list.appendChild(
+        el("div", {
+          className: "empty-state",
+          text: allUsers.length
+            ? "No app users match this search or filter."
+            : "No app users logged in yet."
+        })
+      );
+    } else {
+      rows.forEach((u) => {
+        list.appendChild(buildAppUserCard(u, writable));
+      });
+    }
+    container.appendChild(list);
+  }
+
   function renderClients(container) {
     const writable = canWrite("clients");
     container.appendChild(
-      renderModuleHeader("Client Management", "Search, edit, or delete registered MILA Hospitality client accounts (" + state.data.clients.length + ").")
+      renderModuleHeader("Client Management", "Search, edit, or delete MILA Hospitality client records (" + state.data.clients.length + ").")
     );
-    container.appendChild(renderSearchBar("Search client name, email, company, or city..."));
+    container.appendChild(renderSearchBar("Search client name, mobile number, email, company, or city..."));
 
     const q = state.searchQuery.trim().toLowerCase();
     const rows = state.data.clients.filter(
       (c) =>
         !q ||
         (c.full_name || "").toLowerCase().includes(q) ||
+        (c.mobile_number || "").toLowerCase().includes(q) ||
         (c.email || "").toLowerCase().includes(q) ||
         (c.company_name || "").toLowerCase().includes(q) ||
         (c.city || "").toLowerCase().includes(q)
@@ -965,15 +1266,17 @@
             })
           );
         }
+        const cleanEmail = isSyntheticPhoneEmail(client.email) ? "Phone OTP Member" : (client.email || "");
+        const lastSeen = formatTimestamp(client.updated_at || client.created_at);
         list.appendChild(
           el("div", { className: "record-card" }, [
             el("div", { className: "record-top" }, [
               pill((client.business_category || "CLIENT").replace(/_/g, " "), "gold"),
-              el("span", { className: "record-small", text: client.city || "" })
+              el("span", { className: "record-small", text: lastSeen ? "Last Active: " + lastSeen : (client.city || "") })
             ]),
-            el("div", { className: "record-title", text: (client.full_name || "Unnamed") + " — " + (client.company_name || "") }),
-            el("div", { className: "record-sub", text: (client.designation || "") + " • " + (client.email || "") }),
-            el("div", { className: "record-meta", text: "Mobile: " + (client.mobile_number || "Not provided") }),
+            el("div", { className: "record-title", text: (client.full_name || "Unnamed") + (client.company_name && client.company_name !== "MILA Hospitality Member" ? " — " + client.company_name : "") }),
+            el("div", { className: "record-sub", text: "Mobile: " + (client.mobile_number || "Not provided") + " • " + cleanEmail }),
+            el("div", { className: "record-meta", text: (client.designation || "Client") + " • " + (client.city || "India") }),
             actions.length ? el("div", { className: "record-actions" }, actions) : null
           ])
         );
@@ -2157,6 +2460,7 @@
 
     switch (mod.id) {
       case "overview": renderOverview(container); break;
+      case "users": renderAppUsers(container); break;
       case "clients": renderClients(container); break;
       case "enquiries": renderEnquiries(container); break;
       case "vacancies": renderVacancies(container); break;

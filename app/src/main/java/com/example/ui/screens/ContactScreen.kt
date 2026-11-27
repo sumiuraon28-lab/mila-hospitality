@@ -157,13 +157,13 @@ fun ContactUsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         GoldOutlineButton(
-                            text = "Client Portal",
+                            text = "My Enquiries",
                             onClick = onOpenClientLogin,
                             testTag = "contact_open_client_portal",
                             modifier = Modifier.weight(1f)
                         )
                         GoldOutlineButton(
-                            text = "Job Seeker Portal",
+                            text = "Job Seeker Profile",
                             onClick = onOpenJobSeekerLogin,
                             testTag = "contact_open_job_seeker_portal",
                             modifier = Modifier.weight(1f)

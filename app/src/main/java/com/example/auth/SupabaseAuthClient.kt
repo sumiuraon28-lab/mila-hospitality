@@ -187,7 +187,7 @@ class SupabaseAuthClient(
         _pendingDraftProfile.value = null
     }
 
-    suspend fun sendPhoneOtp(rawPhone: String): Result<String> {
+    suspend fun sendPhoneOtp(rawPhone: String, fullName: String = ""): Result<String> {
         val normalizedPhone = SupabaseAuthValidator.normalizePhoneE164(rawPhone)
             ?: return Result.failure(IllegalArgumentException("Please enter a valid 10-digit mobile number."))
 
@@ -199,9 +199,19 @@ class SupabaseAuthClient(
 
         return withContext(Dispatchers.IO) {
             try {
+                val cleanName = fullName.trim()
                 val payload = JSONObject().apply {
                     put("phone", normalizedPhone)
                     put("create_user", true)
+                    if (cleanName.isNotEmpty()) {
+                        put(
+                            "data",
+                            JSONObject().apply {
+                                put("full_name", cleanName)
+                                put("mobile_number", normalizedPhone)
+                            }
+                        )
+                    }
                 }
                 val httpRequest = Request.Builder()
                     .url("${normalizedBaseUrl()}/auth/v1/otp")
@@ -294,18 +304,28 @@ class SupabaseAuthClient(
         }
     }
 
-    suspend fun activatePhoneOtpSession(verifiedPhone: VerifiedPhoneOtpSession): SupabaseSession =
+    suspend fun activatePhoneOtpSession(
+        verifiedPhone: VerifiedPhoneOtpSession,
+        enteredFullName: String = ""
+    ): SupabaseSession =
         withContext(Dispatchers.IO) {
             val remoteProfile = dbClient
                 .fetchClientProfile(verifiedPhone.accessToken, verifiedPhone.userId)
                 .getOrNull()
+            val cleanEnteredName = enteredFullName.trim().takeIf { it.length >= 2 }
+            val existingRealName = remoteProfile?.fullName?.trim()?.takeIf {
+                it.length >= 2 &&
+                    !it.equals("MILA Guest", ignoreCase = true) &&
+                    !it.equals("MILA Client", ignoreCase = true)
+            }
+            val resolvedName = cleanEnteredName ?: existingRealName ?: "MILA Member"
             val fallbackEmail = remoteProfile?.email?.takeIf { it.isNotBlank() }
                 ?: "${verifiedPhone.phone.filter { it.isDigit() }}@phone.mila.local"
             val metadata = if (remoteProfile != null) {
                 SupabaseClientMetadata(
-                    fullName = remoteProfile.fullName,
-                    email = remoteProfile.email,
-                    mobileNumber = remoteProfile.mobileNumber.ifBlank { verifiedPhone.phone },
+                    fullName = resolvedName,
+                    email = remoteProfile.email.ifBlank { fallbackEmail },
+                    mobileNumber = verifiedPhone.phone.ifBlank { remoteProfile.mobileNumber },
                     companyName = remoteProfile.companyName,
                     designation = remoteProfile.designation,
                     city = remoteProfile.city,
@@ -313,7 +333,7 @@ class SupabaseAuthClient(
                 )
             } else {
                 SupabaseClientMetadata(
-                    fullName = "MILA Guest",
+                    fullName = resolvedName,
                     email = fallbackEmail,
                     mobileNumber = verifiedPhone.phone,
                     companyName = "MILA Hospitality Member",
@@ -329,9 +349,8 @@ class SupabaseAuthClient(
                 email = metadata.email,
                 metadata = metadata
             )
-            if (remoteProfile == null) {
-                syncClientTables(session, metadata)
-            }
+            // Always upsert on every login so Admin sees latest Name, Mobile Number, and Last Active time
+            syncClientTables(session, metadata)
             _session.value = session
             _pendingDraftProfile.value = metadata
             refreshClientEnquiries()
@@ -709,6 +728,44 @@ class SupabaseAuthClient(
                     syncClientTables(updatedSession, metadata)
                     Result.success(updatedSession)
                 }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun updateQuickMemberDetails(
+        fullName: String,
+        mobileNumber: String,
+        optionalEmail: String = ""
+    ): Result<SupabaseSession> {
+        val currentSession = _session.value
+            ?: return Result.failure(IllegalStateException("No active session."))
+        val cleanName = fullName.trim()
+        val cleanMobile = mobileNumber.trim()
+        if (cleanName.length < 2) {
+            return Result.failure(IllegalArgumentException("Please enter your full name."))
+        }
+        if (cleanMobile.length < 7) {
+            return Result.failure(IllegalArgumentException("Please enter a valid mobile number."))
+        }
+        val resolvedEmail = optionalEmail.trim().takeIf { it.contains("@") }
+            ?: currentSession.email
+        val updatedMetadata = currentSession.metadata.copy(
+            fullName = cleanName,
+            mobileNumber = cleanMobile,
+            email = resolvedEmail
+        )
+        val updatedSession = currentSession.copy(
+            email = resolvedEmail,
+            metadata = updatedMetadata
+        )
+        return withContext(Dispatchers.IO) {
+            try {
+                syncClientTables(updatedSession, updatedMetadata)
+                _session.value = updatedSession
+                _pendingDraftProfile.value = updatedMetadata
+                Result.success(updatedSession)
             } catch (e: Exception) {
                 Result.failure(e)
             }

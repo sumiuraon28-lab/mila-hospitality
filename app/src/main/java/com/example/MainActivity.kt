@@ -177,7 +177,7 @@ private val allPagesDirectory = listOf(
     DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/business-concept-development", "07. Business & Concept Dev.", "8 Service Categories", Icons.Outlined.CollectionsBookmark),
     DrawerNavEntry("$ROUTE_SERVICE_DETAIL_BASE/hospitality-management-solutions", "08. Management Solutions", "8 Service Categories", Icons.Outlined.Apartment),
     DrawerNavEntry(ROUTE_CONTACT, "Contact Us", "Connect & Portals", Icons.Outlined.ContactMail),
-    DrawerNavEntry(ROUTE_CLIENT_LOGIN, "Client Login", "Connect & Portals", Icons.AutoMirrored.Outlined.Login),
+    DrawerNavEntry(ROUTE_CLIENT_LOGIN, "My Account & Enquiries", "Connect & Portals", Icons.Outlined.ContactMail),
     DrawerNavEntry(ROUTE_JOB_SEEKER_LOGIN, "Job Seeker Profile & CV", "Connect & Portals", Icons.Outlined.PersonSearch)
 )
 

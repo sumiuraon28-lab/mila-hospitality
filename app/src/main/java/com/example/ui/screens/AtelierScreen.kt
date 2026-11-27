@@ -74,7 +74,7 @@ fun AtelierScreen(
             "Our Portfolio" to "our_portfolio",
             "Careers" to "careers",
             "Contact Us" to "contact_us",
-            "Client Login" to "client_login",
+            "My Enquiries" to "client_login",
             "Job Seeker Profile & CV" to "job_seeker_login"
         )
     }
