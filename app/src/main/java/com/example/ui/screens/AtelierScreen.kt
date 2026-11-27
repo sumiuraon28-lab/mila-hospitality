@@ -44,6 +44,7 @@ import com.example.data.HospitalityRole
 import com.example.data.MilaCatalog
 import com.example.data.PromoBanner
 import com.example.data.Testimonial
+import com.example.ui.components.ClientReviewSheet
 import com.example.ui.components.GoldOutlineButton
 import com.example.ui.components.LuxuryMetricTile
 import com.example.ui.components.SectionHeading
@@ -66,10 +67,15 @@ fun AtelierScreen(
     promoBanners: List<PromoBanner> = emptyList(),
     shouldShowAutoPopup: (String) -> Boolean = { false },
     onAutoPopupShown: (String) -> Unit = {},
+    canWriteReview: Boolean = false,
+    defaultReviewerName: String = "",
+    isSubmittingReview: Boolean = false,
+    onSubmitReview: (reviewerName: String, engagementContext: String, rating: Int, quote: String, onSuccess: () -> Unit) -> Unit = { _, _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var selectedCaseStudy by remember { mutableStateOf<CaseStudy?>(null) }
     var activePopupBanner by remember { mutableStateOf<PromoBanner?>(null) }
+    var showWriteReviewSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(promoBanners) {
         val autoBanner = promoBanners.firstOrNull { it.showAutoPopup && shouldShowAutoPopup(it.id) }
@@ -294,17 +300,43 @@ fun AtelierScreen(
                         modifier = Modifier.padding(horizontal = 20.dp)
                     )
 
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(testimonials, key = { it.id }) { testimonial ->
-                            TestimonialCard(
-                                testimonial = testimonial,
-                                modifier = Modifier.width(310.dp)
+                    if (testimonials.isEmpty()) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
+                            border = BorderStroke(1.dp, MilaGoldSubtle),
+                            shape = MaterialTheme.shapes.large,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                        ) {
+                            Text(
+                                text = "Be the first client to share your experience with MILA Hospitality.",
+                                style = MaterialTheme.typography.bodyMedium.copy(color = MilaWarmStone),
+                                modifier = Modifier.padding(18.dp)
                             )
                         }
+                    } else {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(testimonials, key = { it.id }) { testimonial ->
+                                TestimonialCard(
+                                    testimonial = testimonial,
+                                    modifier = Modifier.width(310.dp)
+                                )
+                            }
+                        }
                     }
+
+                    GoldOutlineButton(
+                        text = "Write a Review",
+                        onClick = { showWriteReviewSheet = true },
+                        testTag = "home_write_review_button",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                    )
                 }
             }
 
@@ -351,6 +383,26 @@ fun AtelierScreen(
                 }
             }
         )
+    }
+
+    if (showWriteReviewSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showWriteReviewSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MilaCharcoalSurface,
+            contentColor = MilaIvory
+        ) {
+            ClientReviewSheet(
+                canSubmitDirectReview = canWriteReview,
+                defaultReviewerName = defaultReviewerName,
+                isSubmitting = isSubmittingReview,
+                onSubmit = { name, contextText, rating, quote ->
+                    onSubmitReview(name, contextText, rating, quote) {
+                        showWriteReviewSheet = false
+                    }
+                }
+            )
+        }
     }
 }
 

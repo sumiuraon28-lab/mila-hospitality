@@ -5,10 +5,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,35 +26,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.auth.SupabaseSession
-import com.example.data.ClientProfile
-import com.example.data.ConsultationInquiry
-import com.example.data.ConsultationServiceType
 import com.example.data.MilaCatalog
-import com.example.ui.components.ConsultationRequestSheet
-import com.example.ui.components.GoldOutlineButton
 import com.example.ui.components.SectionHeading
 import com.example.ui.theme.MilaChampagneGold
 import com.example.ui.theme.MilaCharcoalDeep
-import com.example.ui.theme.MilaCharcoalSurface
 import com.example.ui.theme.MilaGoldSubtle
 import com.example.ui.theme.MilaIvory
 import com.example.ui.theme.MilaWarmStone
-import com.google.firebase.auth.FirebaseUser
 
 @Composable
 fun ContactUsScreen(
-    currentUser: FirebaseUser?,
-    initialServiceType: ConsultationServiceType,
-    isSubmitting: Boolean,
-    onAuthSuccess: () -> Unit,
-    onAuthError: (String) -> Unit,
-    onSubmitInquiry: (ConsultationInquiry) -> Unit,
-    onOpenClientLogin: () -> Unit,
-    onOpenJobSeekerLogin: () -> Unit,
-    modifier: Modifier = Modifier,
-    clientProfile: ClientProfile? = null,
-    supabaseSession: SupabaseSession? = null
+    modifier: Modifier = Modifier
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -67,7 +47,7 @@ fun ContactUsScreen(
             SectionHeading(
                 eyebrow = "Contact Us",
                 title = "Connect With MILA Partners",
-                subtitle = "Submit a direct consultation enquiry for MILA Consultancy, MILA Talent, or MILA Academy & Expertise.",
+                subtitle = "Connect with MILA Consultancy, MILA Talent, and MILA Academy & Expertise across India, South Asia, GCC, and international markets.",
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
         }
@@ -151,49 +131,6 @@ fun ContactUsScreen(
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        GoldOutlineButton(
-                            text = "My Enquiries",
-                            onClick = onOpenClientLogin,
-                            testTag = "contact_open_client_portal",
-                            modifier = Modifier.weight(1f)
-                        )
-                        GoldOutlineButton(
-                            text = "Job Seeker Profile",
-                            onClick = onOpenJobSeekerLogin,
-                            testTag = "contact_open_job_seeker_portal",
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
-                border = BorderStroke(1.dp, MilaGoldSubtle),
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-            ) {
-                Column(modifier = Modifier.padding(top = 20.dp)) {
-                    ConsultationRequestSheet(
-                        currentUser = currentUser,
-                        initialServiceType = initialServiceType,
-                        isSubmitting = isSubmitting,
-                        onAuthSuccess = onAuthSuccess,
-                        onAuthError = onAuthError,
-                        onSubmit = onSubmitInquiry,
-                        clientProfile = clientProfile,
-                        supabaseSession = supabaseSession,
-                        scrollable = false
-                    )
                 }
             }
         }

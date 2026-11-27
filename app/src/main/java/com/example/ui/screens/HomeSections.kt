@@ -23,7 +23,10 @@ import androidx.compose.material.icons.rounded.FormatQuote
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.PersonSearch
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarOutline
 import androidx.compose.material.icons.rounded.WineBar
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -405,6 +408,7 @@ fun TestimonialCard(
     testimonial: Testimonial,
     modifier: Modifier = Modifier
 ) {
+    val safeRating = testimonial.rating.coerceIn(1, 5)
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
@@ -415,12 +419,31 @@ fun TestimonialCard(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                imageVector = Icons.Rounded.FormatQuote,
-                contentDescription = null,
-                tint = MilaChampagneGold,
-                modifier = Modifier.size(26.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.FormatQuote,
+                    contentDescription = null,
+                    tint = MilaChampagneGold,
+                    modifier = Modifier.size(26.dp)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    (1..5).forEach { star ->
+                        Icon(
+                            imageVector = if (star <= safeRating) Icons.Rounded.Star else Icons.Rounded.StarOutline,
+                            contentDescription = if (star == 1) "$safeRating out of 5 stars" else null,
+                            tint = if (star <= safeRating) MilaChampagneGold else MilaWarmStone,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
             Text(
                 text = "\"${testimonial.quote}\"",
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -436,10 +459,49 @@ fun TestimonialCard(
                     fontWeight = FontWeight.SemiBold
                 )
             )
-            Text(
-                text = testimonial.engagementContext,
-                style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
-            )
+            if (testimonial.engagementContext.isNotBlank()) {
+                Text(
+                    text = testimonial.engagementContext,
+                    style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
+                )
+            }
+            if (testimonial.adminReply.isNotBlank()) {
+                Surface(
+                    color = MilaCharcoalDeep,
+                    border = BorderStroke(1.dp, MilaGoldSubtle),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Reply,
+                                contentDescription = null,
+                                tint = MilaChampagneGold,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "MILA HOSPITALITY REPLY",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = MilaChampagneGold,
+                                    letterSpacing = 1.2.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        }
+                        Text(
+                            text = testimonial.adminReply,
+                            style = MaterialTheme.typography.bodySmall.copy(color = MilaIvory)
+                        )
+                    }
+                }
+            }
         }
     }
 }

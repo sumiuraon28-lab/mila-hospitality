@@ -688,6 +688,44 @@ body {
   min-width: 150px;
 }
 
+.review-stars {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gold);
+  letter-spacing: 1px;
+}
+
+.review-quote {
+  font-size: 14px;
+  line-height: 1.55;
+  font-style: italic;
+  color: var(--ivory);
+}
+
+.review-reply-box {
+  background: rgba(214, 189, 150, 0.08);
+  border: 1px solid var(--gold-muted);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.review-reply-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: var(--gold);
+}
+
+.review-reply-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ivory);
+}
+
 .sidebar-backdrop {
   display: none;
 }

@@ -72,6 +72,7 @@
     liveSyncEnabled: true,
     knownEnquiryIds: new Set(),
     knownUserIds: new Set(),
+    knownReviewIds: new Set(),
     hasInitialSync: false,
     pollTimer: null,
     data: {
@@ -143,7 +144,7 @@
     { id: "banners", label: "Top Banner & Popup Alerts", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "services", label: "Services", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "portfolio", label: "Portfolio Projects", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
-    { id: "testimonials", label: "Testimonials", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
+    { id: "testimonials", label: "Reviews & Testimonials", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "team", label: "Team Members", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "pages", label: "Website Content", group: "Content & Branding", roles: ["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN", "CONTENT_ADMIN"] },
     { id: "admins", label: "Admin Users & Invites", group: "Governance", roles: ["SUPER_ADMIN", "REPORTING_ADMIN"], writeRoles: ["SUPER_ADMIN"] },
@@ -556,15 +557,16 @@
       if (["SUPER_ADMIN", "CONTENT_ADMIN", "REPORTING_ADMIN"].includes(role)) {
         tasks.push(safeFetchList("/rest/v1/services?order=sort_order.asc").then((r) => (state.data.services = r)));
         tasks.push(safeFetchList("/rest/v1/portfolio_projects?order=sort_order.asc").then((r) => (state.data.portfolio = r)));
-        tasks.push(safeFetchList("/rest/v1/testimonials?order=sort_order.asc").then((r) => (state.data.testimonials = r)));
+        tasks.push(safeFetchList("/rest/v1/testimonials?order=created_at.desc,sort_order.asc").then((r) => (state.data.testimonials = r)));
         tasks.push(safeFetchList("/rest/v1/team_members?order=sort_order.asc").then((r) => (state.data.team = r)));
         tasks.push(safeFetchList("/rest/v1/website_content?order=updated_at.desc").then((r) => (state.data.pages = r)));
       }
       await Promise.all(tasks);
 
-      // Detect newly arrived client enquiries or new app logins during live sync
+      // Detect newly arrived client enquiries, reviews, or new app logins during live sync
       const incomingEnquiries = state.data.enquiries || [];
       const incomingUsers = buildAppUsersDirectory();
+      const incomingReviews = state.data.testimonials || [];
       if (state.hasInitialSync) {
         const brandNew = incomingEnquiries.filter((e) => e.id && !state.knownEnquiryIds.has(e.id));
         if (brandNew.length > 0) {
@@ -572,15 +574,22 @@
           const refLabel = newest.reference_code ? " (" + newest.reference_code + ")" : "";
           showToast("New client enquiry received: " + (newest.property_name || "New Enquiry") + refLabel);
         } else {
-          const brandNewUsers = incomingUsers.filter((u) => u.userId && !state.knownUserIds.has(u.userId));
-          if (brandNewUsers.length > 0) {
-            const u = brandNewUsers[0];
-            showToast("New app user logged in: " + u.fullName + (u.mobileNumber ? " (" + u.mobileNumber + ")" : ""));
+          const brandNewReviews = incomingReviews.filter((r) => r.id && !state.knownReviewIds.has(r.id));
+          if (brandNewReviews.length > 0) {
+            const newestRev = brandNewReviews[0];
+            showToast("New client review submitted by " + (newestRev.attribution_role || "Client"));
+          } else {
+            const brandNewUsers = incomingUsers.filter((u) => u.userId && !state.knownUserIds.has(u.userId));
+            if (brandNewUsers.length > 0) {
+              const u = brandNewUsers[0];
+              showToast("New app user logged in: " + u.fullName + (u.mobileNumber ? " (" + u.mobileNumber + ")" : ""));
+            }
           }
         }
       }
       state.knownEnquiryIds = new Set(incomingEnquiries.map((e) => e.id).filter(Boolean));
       state.knownUserIds = new Set(incomingUsers.map((u) => u.userId).filter(Boolean));
+      state.knownReviewIds = new Set(incomingReviews.map((r) => r.id).filter(Boolean));
       state.hasInitialSync = true;
 
       renderSidebar();
@@ -2199,7 +2208,343 @@
     );
   }
 
-  // Generic CMS list renderer for Services, Portfolio, Testimonials, Team, Pages
+  function formatStarRating(rating) {
+    const safe = Math.max(1, Math.min(5, parseInt(rating, 10) || 5));
+    return "★".repeat(safe) + "☆".repeat(5 - safe) + " (" + safe + "/5)";
+  }
+
+  function renderReviewsManager(container) {
+    const writable = canWrite("testimonials");
+    const allItems = state.data.testimonials || [];
+    const needsReplyCount = allItems.filter((r) => !(r.admin_reply || "").trim()).length;
+    const addBtn = writable
+      ? el("button", { className: "btn btn-gold", type: "button", text: "+ Add Review", onClick: () => openReviewEditorModal(null) })
+      : null;
+
+    container.appendChild(
+      renderModuleHeader(
+        "Client Reviews & Testimonials",
+        "Read client reviews, publish official MILA replies, hide/publish, or delete reviews (" + allItems.length + " total • " + needsReplyCount + " awaiting reply).",
+        addBtn
+      )
+    );
+
+    const filterOptions = [
+      { id: "ALL", label: "All (" + allItems.length + ")" },
+      { id: "NEEDS_REPLY", label: "Awaiting Reply (" + needsReplyCount + ")" },
+      { id: "REPLIED", label: "Replied (" + (allItems.length - needsReplyCount) + ")" },
+      { id: "APP_USER", label: "App Users (" + allItems.filter((r) => r.source === "APP_USER").length + ")" },
+      { id: "HIDDEN", label: "Hidden (" + allItems.filter((r) => !r.published).length + ")" }
+    ];
+
+    const activeFilter = filterOptions.some((f) => f.id === state.statusFilter) ? state.statusFilter : "ALL";
+    const chips = el(
+      "div",
+      { className: "stage-chips", style: { marginBottom: "14px" } },
+      filterOptions.map((opt) =>
+        el("button", {
+          className: "chip-btn" + (activeFilter === opt.id ? " active" : ""),
+          type: "button",
+          text: opt.label,
+          onClick: () => {
+            state.statusFilter = opt.id;
+            renderActiveModule();
+          }
+        })
+      )
+    );
+
+    const searchInput = el("input", {
+      className: "search-input",
+      placeholder: "Search by reviewer, property, review text, or reply...",
+      value: state.searchQuery,
+      onInput: (e) => {
+        state.searchQuery = e.target.value;
+        renderActiveModule();
+      }
+    });
+    container.appendChild(el("div", { className: "toolbar" }, [searchInput]));
+    container.appendChild(chips);
+
+    const q = (state.searchQuery || "").trim().toLowerCase();
+    const filtered = allItems.filter((item) => {
+      const hasReply = Boolean((item.admin_reply || "").trim());
+      if (activeFilter === "NEEDS_REPLY" && hasReply) return false;
+      if (activeFilter === "REPLIED" && !hasReply) return false;
+      if (activeFilter === "APP_USER" && item.source !== "APP_USER") return false;
+      if (activeFilter === "HIDDEN" && item.published) return false;
+      if (q) {
+        const hay = [
+          item.attribution_role,
+          item.engagement_context,
+          item.reviewer_email,
+          item.quote,
+          item.admin_reply
+        ].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const list = el("div", { className: "records-list" });
+    if (!filtered.length) {
+      list.appendChild(
+        el("div", {
+          className: "empty-state",
+          text: allItems.length
+            ? "No reviews match your current filter."
+            : "No reviews in database yet. Run the Reviews SQL migration or click '+ Add Review' to add one."
+        })
+      );
+    } else {
+      filtered.forEach((item) => {
+        const hasReply = Boolean((item.admin_reply || "").trim());
+        const isAppUser = item.source === "APP_USER";
+        const topLeftPills = el("div", { className: "stage-chips" }, [
+          pill(item.published ? "Published" : "Hidden", item.published ? "emerald" : "muted"),
+          pill(isAppUser ? "App User Review" : "Admin Testimonial", isAppUser ? "gold" : "muted"),
+          pill(hasReply ? "Replied" : "Awaiting Reply", hasReply ? "emerald" : "alert")
+        ]);
+
+        const metaParts = [item.engagement_context || ""];
+        if (item.reviewer_email) metaParts.push(item.reviewer_email);
+        if (item.created_at) metaParts.push(fmtDate(item.created_at));
+        const metaLine = metaParts.filter(Boolean).join(" • ");
+
+        const cardNodes = [
+          el("div", { className: "record-top" }, [
+            topLeftPills,
+            el("span", { className: "review-stars", text: formatStarRating(item.rating) })
+          ]),
+          el("div", { className: "record-title", text: item.attribution_role || "Client Reviewer" }),
+          metaLine ? el("div", { className: "record-small", text: metaLine }) : null,
+          el("div", { className: "review-quote", text: "\"" + (item.quote || "") + "\"" })
+        ];
+
+        if (hasReply) {
+          const replyMeta = [
+            item.admin_replied_by ? "By " + item.admin_replied_by : "MILA Hospitality",
+            item.admin_replied_at ? fmtDate(item.admin_replied_at) : ""
+          ].filter(Boolean).join(" • ");
+          cardNodes.push(
+            el("div", { className: "review-reply-box" }, [
+              el("div", { className: "review-reply-label", text: "MILA HOSPITALITY REPLY" }),
+              el("div", { className: "review-reply-text", text: item.admin_reply }),
+              replyMeta ? el("div", { className: "record-small", text: replyMeta }) : null
+            ])
+          );
+        }
+
+        if (writable) {
+          const actions = [
+            el("button", {
+              className: hasReply ? "btn btn-outline btn-sm" : "btn btn-gold btn-sm",
+              type: "button",
+              text: hasReply ? "Edit Reply" : "Reply",
+              onClick: () => openReviewReplyModal(item)
+            }),
+            el("button", {
+              className: "btn btn-outline btn-sm",
+              type: "button",
+              text: "Edit",
+              onClick: () => openReviewEditorModal(item)
+            }),
+            el("button", {
+              className: "btn btn-ghost btn-sm",
+              type: "button",
+              text: item.published ? "Hide" : "Publish",
+              onClick: async () => {
+                await mutateTable(
+                  "PATCH",
+                  "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id),
+                  { published: !item.published },
+                  { module: "TESTIMONIALS", action: "UPDATE", targetId: item.id, summary: (item.published ? "Hid" : "Published") + " review from " + (item.attribution_role || "Client") }
+                );
+                showToast(item.published ? "Review hidden from app." : "Review published to app.");
+                await refreshAllData(false);
+              }
+            }),
+            el("button", {
+              className: "btn btn-danger btn-sm",
+              type: "button",
+              text: "Delete",
+              onClick: () =>
+                confirmDelete(
+                  "Delete Review?",
+                  "Permanently delete the review by '" + (item.attribution_role || "Client") + "'? It will be removed from the MILA app immediately.",
+                  async () => {
+                    await mutateTable("DELETE", "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id), null, {
+                      module: "TESTIMONIALS",
+                      action: "DELETE",
+                      targetId: item.id,
+                      summary: "Deleted review by " + (item.attribution_role || "Client")
+                    });
+                    showToast("Review deleted permanently.");
+                  }
+                )
+            })
+          ];
+          cardNodes.push(el("div", { className: "record-actions" }, actions));
+        }
+
+        list.appendChild(el("div", { className: "record-card" }, cardNodes));
+      });
+    }
+    container.appendChild(list);
+  }
+
+  function openReviewReplyModal(item) {
+    const existingReply = (item.admin_reply || "").trim();
+    const replyInput = el("textarea", {
+      value: existingReply,
+      placeholder: "Write an official MILA Hospitality reply (shown publicly below this review in the app)..."
+    });
+
+    const bodyNodes = [
+      el("div", { className: "dossier-row" }, [
+        el("strong", { text: "Reviewer: " }),
+        document.createTextNode((item.attribution_role || "Client") + " • " + formatStarRating(item.rating))
+      ]),
+      el("div", { className: "review-quote", style: { margin: "10px 0 14px 0" }, text: "\"" + (item.quote || "") + "\"" }),
+      buildFormField("Official MILA Hospitality Reply *", replyInput)
+    ];
+
+    const footerButtons = [
+      el("button", { className: "btn btn-ghost", type: "button", text: "Cancel", onClick: closeModal })
+    ];
+
+    if (existingReply) {
+      footerButtons.push(
+        el("button", {
+          className: "btn btn-danger",
+          type: "button",
+          text: "Clear Reply",
+          onClick: async () => {
+            try {
+              await mutateTable(
+                "PATCH",
+                "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id),
+                { admin_reply: "", admin_replied_by: "", admin_replied_at: null },
+                { module: "TESTIMONIALS", action: "UPDATE", targetId: item.id, summary: "Cleared admin reply on review by " + (item.attribution_role || "Client") }
+              );
+              closeModal();
+              showToast("Reply removed.");
+              await refreshAllData(false);
+            } catch (err) {
+              showToast(err.message || "Could not clear reply.");
+            }
+          }
+        })
+      );
+    }
+
+    footerButtons.push(
+      el("button", {
+        className: "btn btn-gold",
+        type: "button",
+        text: "Save Reply",
+        onClick: async () => {
+          const replyText = replyInput.value.trim();
+          if (!replyText) {
+            showToast("Please enter a reply before saving.");
+            return;
+          }
+          const replierName = (state.admin && (state.admin.full_name || state.admin.email)) || "MILA Hospitality Team";
+          try {
+            await mutateTable(
+              "PATCH",
+              "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id),
+              {
+                admin_reply: replyText,
+                admin_replied_by: replierName,
+                admin_replied_at: new Date().toISOString()
+              },
+              { module: "TESTIMONIALS", action: "UPDATE", targetId: item.id, summary: "Replied to review by " + (item.attribution_role || "Client") }
+            );
+            closeModal();
+            showToast("Reply saved and published to the MILA app.");
+            await refreshAllData(false);
+          } catch (err) {
+            const msg = String(err.message || "");
+            if (msg.toLowerCase().includes("admin_reply")) {
+              showToast("Please run the Reviews & Replies SQL update in Supabase SQL Editor first.");
+            } else {
+              showToast(msg || "Failed to save reply.");
+            }
+          }
+        }
+      })
+    );
+
+    openModal(existingReply ? "Edit MILA Reply" : "Reply to Client Review", bodyNodes, footerButtons);
+  }
+
+  function openReviewEditorModal(item) {
+    const isEdit = Boolean(item && item.id);
+    const fQuote = el("textarea", { value: (item && item.quote) || "", placeholder: "Client review / testimonial text..." });
+    const fRole = el("input", { value: (item && item.attribution_role) || "", placeholder: "e.g., Managing Partner or Client Name" });
+    const fContext = el("input", { value: (item && item.engagement_context) || "", placeholder: "e.g., Luxury Heritage Resort • Rajasthan" });
+    const fRating = el("select", {}, [5, 4, 3, 2, 1].map((n) =>
+      el("option", { value: String(n), text: "★".repeat(n) + " (" + n + " / 5)" })
+    ));
+    fRating.value = String((item && item.rating) || 5);
+    const fOrder = el("input", { type: "number", value: String((item && item.sort_order) || 1) });
+    const fPub = el("input", { type: "checkbox", checked: item ? Boolean(item.published) : true });
+
+    const bodyNodes = [
+      buildFormField("Review Text *", fQuote),
+      buildFormField("Reviewer Name / Role *", fRole),
+      buildFormField("Property / Engagement Context", fContext),
+      buildFormField("Star Rating", fRating),
+      buildFormField("Sort Order", fOrder),
+      el("label", { className: "checkbox-row" }, [fPub, "Published (visible in MILA app)"])
+    ];
+
+    openModal(
+      isEdit ? "Edit Review" : "Add Verified Client Review",
+      bodyNodes,
+      [
+        el("button", { className: "btn btn-ghost", type: "button", text: "Cancel", onClick: closeModal }),
+        el("button", {
+          className: "btn btn-gold",
+          type: "button",
+          text: "Save Review",
+          onClick: async () => {
+            const quote = fQuote.value.trim();
+            const role = fRole.value.trim();
+            if (quote.length < 5 || role.length < 2) {
+              showToast("Please enter both the review text and reviewer name/role.");
+              return;
+            }
+            const payload = {
+              quote,
+              attribution_role: role,
+              engagement_context: fContext.value.trim(),
+              rating: parseInt(fRating.value, 10) || 5,
+              sort_order: parseInt(fOrder.value, 10) || 1,
+              published: fPub.checked
+            };
+            if (!isEdit) payload.source = "ADMIN";
+            try {
+              await mutateTable(
+                isEdit ? "PATCH" : "POST",
+                isEdit ? "/rest/v1/testimonials?id=eq." + encodeURIComponent(item.id) : "/rest/v1/testimonials",
+                payload,
+                { module: "TESTIMONIALS", action: isEdit ? "UPDATE" : "CREATE", targetId: isEdit ? item.id : "new", summary: (isEdit ? "Updated" : "Added") + " review by " + role }
+              );
+              closeModal();
+              showToast("Review saved.");
+              await refreshAllData(false);
+            } catch (err) {
+              showToast(err.message || "Could not save review.");
+            }
+          }
+        })
+      ]
+    );
+  }
+
+  // Generic CMS list renderer for Services, Portfolio, Team, Pages
   function renderCmsTable(container, cfg) {
     const writable = canWrite(cfg.moduleId);
     const addBtn = writable
@@ -3162,25 +3507,7 @@
         });
         break;
       case "testimonials":
-        renderCmsTable(container, {
-          moduleId: "testimonials",
-          table: "testimonials",
-          auditModule: "TESTIMONIALS",
-          title: "Client Testimonials",
-          subtitle: "Manage verified owner and executive endorsements",
-          singular: "Testimonial",
-          addLabel: "Add Testimonial",
-          items: state.data.testimonials,
-          getTitle: (t) => t.attribution_role || "Client Endorsement",
-          getBadge: (t) => t.engagement_context || "",
-          getBody: (t) => t.quote || "",
-          fields: [
-            { key: "quote", label: "Quote *", type: "textarea" },
-            { key: "attribution_role", label: "Attribution / Role *" },
-            { key: "engagement_context", label: "Engagement Context" },
-            { key: "sort_order", label: "Sort Order", type: "number", defaultValue: 1 }
-          ]
-        });
+        renderReviewsManager(container);
         break;
       case "team":
         renderCmsTable(container, {

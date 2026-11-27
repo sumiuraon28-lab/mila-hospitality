@@ -36,6 +36,7 @@ class ServiceCatalogViewModel(
     val isRefreshingVacancies: StateFlow<Boolean> = _isRefreshingVacancies.asStateFlow()
     private val _supabasePortfolio = MutableStateFlow<List<CaseStudy>>(emptyList())
     private val _supabaseTestimonials = MutableStateFlow<List<Testimonial>>(emptyList())
+    private val _hasLoadedSupabaseTestimonials = MutableStateFlow(false)
     private val _websiteContent = MutableStateFlow<List<SitePageContent>>(emptyList())
     val websiteContent: StateFlow<List<SitePageContent>> = _websiteContent.asStateFlow()
     private val _promoBanners = MutableStateFlow<List<PromoBanner>>(emptyList())
@@ -66,7 +67,10 @@ class ServiceCatalogViewModel(
             }
             _isRefreshingVacancies.value = false
             supabaseDb.fetchPublishedPortfolio().onSuccess { if (it.isNotEmpty()) _supabasePortfolio.value = it }
-            supabaseDb.fetchPublishedTestimonials().onSuccess { if (it.isNotEmpty()) _supabaseTestimonials.value = it }
+            supabaseDb.fetchPublishedTestimonials().onSuccess {
+                _supabaseTestimonials.value = it
+                _hasLoadedSupabaseTestimonials.value = true
+            }
             supabaseDb.fetchPublishedWebsiteContent().onSuccess { list ->
                 _websiteContent.value = list.filterNot { it.isPromoBanner() }
                 _promoBanners.value = list.filter { it.isPromoBanner() }.map { it.toPromoBanner() }
@@ -93,6 +97,43 @@ class ServiceCatalogViewModel(
             }
             _isRefreshingVacancies.value = false
         }
+    }
+
+    fun refreshTestimonials() {
+        if (!supabaseDb.isConfigured()) return
+        viewModelScope.launch {
+            supabaseDb.fetchPublishedTestimonials().onSuccess {
+                _supabaseTestimonials.value = it
+                _hasLoadedSupabaseTestimonials.value = true
+            }
+        }
+    }
+
+    suspend fun submitClientReview(
+        accessToken: String,
+        userId: String,
+        reviewerName: String,
+        reviewerEmail: String,
+        engagementContext: String,
+        rating: Int,
+        quote: String
+    ): Result<Unit> {
+        val result = supabaseDb.submitClientReview(
+            accessToken = accessToken,
+            userId = userId,
+            reviewerName = reviewerName,
+            reviewerEmail = reviewerEmail,
+            engagementContext = engagementContext,
+            rating = rating,
+            quote = quote
+        )
+        if (result.isSuccess) {
+            supabaseDb.fetchPublishedTestimonials().onSuccess {
+                _supabaseTestimonials.value = it
+                _hasLoadedSupabaseTestimonials.value = true
+            }
+        }
+        return result
     }
 
     val services: StateFlow<List<ConsultancyService>> = combine(
@@ -131,9 +172,10 @@ class ServiceCatalogViewModel(
 
     val testimonials: StateFlow<List<Testimonial>> = combine(
         publicCmsRepository?.observePublishedTestimonials() ?: flowOf(MilaCatalog.testimonials),
-        _supabaseTestimonials
-    ) { firestoreList, supabaseList ->
-        if (supabaseList.isNotEmpty()) supabaseList else firestoreList
+        _supabaseTestimonials,
+        _hasLoadedSupabaseTestimonials
+    ) { firestoreList, supabaseList, hasLoadedSupabase ->
+        if (hasLoadedSupabase) supabaseList else firestoreList
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),

@@ -252,9 +252,11 @@ fun MilaAppRoot() {
     // Silently keep the Supabase session token fresh whenever the user returns from another app
     DisposableEffect(lifecycleOwner, supabaseAuthClient) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && supabaseAuthClient.hasSavedSession()) {
-                scope.launch {
-                    supabaseAuthClient.restoreSavedSession()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (supabaseAuthClient.hasSavedSession()) {
+                    scope.launch {
+                        supabaseAuthClient.restoreSavedSession()
+                    }
                 }
             }
         }
@@ -289,6 +291,19 @@ fun MilaAppRoot() {
     val portfolio by catalogViewModel.portfolio.collectAsStateWithLifecycle()
     val testimonials by catalogViewModel.testimonials.collectAsStateWithLifecycle()
     val promoBanners by catalogViewModel.promoBanners.collectAsStateWithLifecycle()
+
+    DisposableEffect(lifecycleOwner, catalogViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                catalogViewModel.refreshTestimonials()
+                catalogViewModel.refreshBanners()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val isAuthenticated = currentUser != null || supabaseSession != null || supabaseCandidateSession != null
 
@@ -362,6 +377,10 @@ fun MilaAppRoot() {
                     onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                     portfolio = portfolio,
                     testimonials = testimonials,
+                    onRefreshTestimonials = { catalogViewModel.refreshTestimonials() },
+                    onSubmitReview = { accessToken, userId, name, email, ctx, rating, quote ->
+                        catalogViewModel.submitClientReview(accessToken, userId, name, email, ctx, rating, quote)
+                    },
                     promoBanners = promoBanners,
                     onRefreshBanners = { catalogViewModel.refreshBanners() },
                     shouldShowAutoPopup = { id -> catalogViewModel.shouldShowAutoPopup(id) },
@@ -383,6 +402,10 @@ fun MilaAppRoot() {
                 onRefreshVacancies = { catalogViewModel.refreshVacancies() },
                 portfolio = portfolio,
                 testimonials = testimonials,
+                onRefreshTestimonials = { catalogViewModel.refreshTestimonials() },
+                onSubmitReview = { accessToken, userId, name, email, ctx, rating, quote ->
+                    catalogViewModel.submitClientReview(accessToken, userId, name, email, ctx, rating, quote)
+                },
                 promoBanners = promoBanners,
                 onRefreshBanners = { catalogViewModel.refreshBanners() },
                 shouldShowAutoPopup = { id -> catalogViewModel.shouldShowAutoPopup(id) },
@@ -408,6 +431,16 @@ private fun MilaAppShell(
     onRefreshVacancies: () -> Unit,
     portfolio: List<CaseStudy>,
     testimonials: List<Testimonial>,
+    onRefreshTestimonials: () -> Unit,
+    onSubmitReview: suspend (
+        accessToken: String,
+        userId: String,
+        reviewerName: String,
+        reviewerEmail: String,
+        engagementContext: String,
+        rating: Int,
+        quote: String
+    ) -> Result<Unit>,
     promoBanners: List<PromoBanner>,
     onRefreshBanners: () -> Unit,
     shouldShowAutoPopup: (String) -> Boolean,
@@ -439,7 +472,6 @@ private fun MilaAppShell(
         }
     }
 
-    var contactServiceType by remember { mutableStateOf(ConsultationServiceType.HOSPITALITY_PRE_OPENING) }
     var consultationSheetType by remember { mutableStateOf<ConsultationServiceType?>(null) }
     var applyingRole by remember { mutableStateOf<HospitalityRole?>(null) }
 
@@ -658,9 +690,14 @@ private fun MilaAppShell(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             composable(ROUTE_HOME) {
+                                var isSubmittingReview by remember { mutableStateOf(false) }
                                 LaunchedEffect(Unit) {
                                     onRefreshBanners()
+                                    onRefreshTestimonials()
                                 }
+                                val reviewerDefaultName = clientProfile?.fullName?.takeIf { it.isNotBlank() }
+                                    ?: supabaseSession?.metadata?.fullName?.takeIf { it.isNotBlank() && !it.equals("MILA Guest", ignoreCase = true) }
+                                    ?: currentUser?.displayName.orEmpty()
                                 AtelierScreen(
                                     services = services,
                                     openRoles = vacancies,
@@ -669,6 +706,40 @@ private fun MilaAppShell(
                                     promoBanners = promoBanners,
                                     shouldShowAutoPopup = shouldShowAutoPopup,
                                     onAutoPopupShown = onAutoPopupShown,
+                                    canWriteReview = supabaseSession != null,
+                                    defaultReviewerName = reviewerDefaultName,
+                                    isSubmittingReview = isSubmittingReview,
+                                    onSubmitReview = { name, contextText, rating, quote, onSuccess ->
+                                        val activeSession = supabaseSession
+                                        if (activeSession == null) {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar("Please sign in with Email OTP to submit a review.")
+                                            }
+                                        } else {
+                                            scope.launch {
+                                                isSubmittingReview = true
+                                                val res = onSubmitReview(
+                                                    activeSession.accessToken,
+                                                    activeSession.userId,
+                                                    name,
+                                                    activeSession.email,
+                                                    contextText,
+                                                    rating,
+                                                    quote
+                                                )
+                                                isSubmittingReview = false
+                                                res.fold(
+                                                    onSuccess = {
+                                                        onSuccess()
+                                                        snackbarHostState.showSnackbar("Thank you! Your review has been published.")
+                                                    },
+                                                    onFailure = { err ->
+                                                        snackbarHostState.showSnackbar(err.localizedMessage ?: "Could not publish review right now.")
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    },
                                     onOpenServiceDetail = { service ->
                                         navigateToRoute("$ROUTE_SERVICE_DETAIL_BASE/${service.slug}")
                                     },
@@ -785,45 +856,7 @@ private fun MilaAppShell(
                                 )
                             }
                             composable(ROUTE_CONTACT) {
-                                ContactUsScreen(
-                                    currentUser = currentUser,
-                                    initialServiceType = contactServiceType,
-                                    isSubmitting = isSubmitting,
-                                    onAuthSuccess = {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("Signed in. You can now submit your enquiry.")
-                                        }
-                                    },
-                                    onAuthError = { msg ->
-                                        scope.launch { snackbarHostState.showSnackbar(msg) }
-                                    },
-                                    onSubmitInquiry = { inquiry ->
-                                        if (mandatesViewModel != null) {
-                                            mandatesViewModel.submitInquiry(inquiry)
-                                            if (supabaseSession != null) {
-                                                scope.launch { supabaseAuthClient.submitServiceEnquiry(inquiry) }
-                                            }
-                                        } else if (supabaseSession != null) {
-                                            scope.launch {
-                                                isSupabaseSubmitting = true
-                                                val res = supabaseAuthClient.submitServiceEnquiry(inquiry)
-                                                isSupabaseSubmitting = false
-                                                res.fold(
-                                                    onSuccess = { confirmation ->
-                                                        supabaseEnquiryConfirmation = confirmation
-                                                    },
-                                                    onFailure = { err ->
-                                                        snackbarHostState.showSnackbar(err.localizedMessage ?: "Failed to submit enquiry.")
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onOpenClientLogin = { navigateToRoute(ROUTE_CLIENT_LOGIN) },
-                                    onOpenJobSeekerLogin = { navigateToRoute(ROUTE_JOB_SEEKER_LOGIN) },
-                                    clientProfile = clientProfile,
-                                    supabaseSession = supabaseSession
-                                )
+                                ContactUsScreen()
                             }
                             composable(ROUTE_CLIENT_LOGIN) {
                                 ClientLoginScreen(

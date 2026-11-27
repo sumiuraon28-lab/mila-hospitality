@@ -22,7 +22,11 @@ data class Testimonial(
     val id: String,
     val quote: String,
     val attributionRole: String,
-    val engagementContext: String
+    val engagementContext: String,
+    val rating: Int = 5,
+    val adminReply: String = "",
+    val adminRepliedAt: String? = null,
+    val source: String = "ADMIN"
 )
 
 data class ConsultancyService(

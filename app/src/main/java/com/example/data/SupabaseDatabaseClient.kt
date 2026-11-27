@@ -498,7 +498,7 @@ class SupabaseDatabaseClient(
 
     suspend fun fetchPublishedTestimonials(): Result<List<Testimonial>> = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext Result.success(emptyList())
-        executeGetArray("/rest/v1/testimonials?published=eq.true&order=sort_order.asc", null)
+        executeGetArray("/rest/v1/testimonials?published=eq.true&order=sort_order.asc,created_at.desc", null)
             .map { arr ->
                 List(arr.length()) { idx ->
                     val o = arr.getJSONObject(idx)
@@ -506,10 +506,62 @@ class SupabaseDatabaseClient(
                         id = o.optString("id"),
                         quote = o.optString("quote"),
                         attributionRole = o.optString("attribution_role"),
-                        engagementContext = o.optString("engagement_context")
+                        engagementContext = o.optString("engagement_context"),
+                        rating = o.optInt("rating", 5).coerceIn(1, 5),
+                        adminReply = o.optString("admin_reply").takeIf { it != "null" }.orEmpty(),
+                        adminRepliedAt = o.optString("admin_replied_at").takeIf { it.isNotBlank() && it != "null" },
+                        source = o.optString("source", "ADMIN").ifBlank { "ADMIN" }
                     )
                 }
             }
+    }
+
+    suspend fun submitClientReview(
+        accessToken: String,
+        userId: String,
+        reviewerName: String,
+        reviewerEmail: String,
+        engagementContext: String,
+        rating: Int,
+        quote: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) {
+            return@withContext Result.failure(IllegalStateException("Review service is not configured."))
+        }
+        val cleanName = reviewerName.trim()
+        val cleanQuote = quote.trim()
+        val cleanContext = engagementContext.trim()
+        val cleanEmail = reviewerEmail.trim().lowercase()
+        val safeRating = rating.coerceIn(1, 5)
+        if (cleanName.length < 2) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter your name or role."))
+        }
+        if (cleanQuote.length < 10) {
+            return@withContext Result.failure(IllegalArgumentException("Please write at least 10 characters for your review."))
+        }
+        if (cleanQuote.length > 1200) {
+            return@withContext Result.failure(IllegalArgumentException("Review must be under 1,200 characters."))
+        }
+        val payload = JSONObject().apply {
+            put("quote", cleanQuote)
+            put("attribution_role", cleanName.take(120))
+            put("engagement_context", cleanContext.take(160).ifBlank { "Verified MILA App Client" })
+            put("rating", safeRating)
+            put("reviewer_user_id", userId)
+            put("reviewer_email", cleanEmail)
+            put("source", "APP_USER")
+            put("admin_reply", "")
+            put("admin_replied_by", "")
+            put("sort_order", 10)
+            put("published", true)
+        }
+        executeMutation(
+            method = "POST",
+            path = "/rest/v1/testimonials",
+            accessToken = accessToken,
+            body = payload.toString(),
+            prefer = "return=minimal"
+        )
     }
 
     suspend fun fetchPublishedWebsiteContent(): Result<List<SitePageContent>> = withContext(Dispatchers.IO) {

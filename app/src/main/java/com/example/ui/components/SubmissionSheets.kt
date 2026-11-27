@@ -570,7 +570,7 @@ fun JobApplicationSheet(
 }
 
 @Composable
-private fun MilaFormField(
+internal fun MilaFormField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
