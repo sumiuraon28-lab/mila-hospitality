@@ -6,6 +6,7 @@ on:
     paths:
       - "ios-app/**"
       - "admin-portal/**"
+      - "legal/**"
       - "index.html"
       - ".github/workflows/deploy-admin-portal.yml"
   workflow_dispatch:
@@ -52,6 +53,7 @@ jobs:
           mkdir -p _pages_dist
           cp -r admin-portal _pages_dist/admin-portal
           cp -r ios-app _pages_dist/ios-app
+          cp -r legal _pages_dist/legal
           cp index.html _pages_dist/index.html
           touch _pages_dist/.nojekyll
           node -e '

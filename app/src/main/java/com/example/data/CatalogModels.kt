@@ -91,6 +91,14 @@ data class MixologySignature(
 
 enum class RoleCategory(val displayLabel: String) {
     ALL("All Departments"),
+    HOSTESS("Hostess"),
+    GRE("GRE"),
+    BARTENDER("Bartender"),
+    HOUSEKEEPING("Housekeeping"),
+    DRIVER("Driver"),
+    STORE_KEEPER("Store Keeper"),
+    STORE_MANAGER("Store Manager"),
+    MAINTENANCE("Maintenance"),
     EXECUTIVE("Executive & GM"),
     CULINARY("Culinary & Pastry"),
     MIXOLOGY("Bar & Mixology"),

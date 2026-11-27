@@ -130,6 +130,52 @@
     deskNote: "Reach our partner desk directly by phone or email for consultancy mandates, pre-opening advisory, or talent partnerships."
   };
 
+  const HOSPITALITY_DEPARTMENTS = [
+    { code: "HOSTESS", label: "Hostess" },
+    { code: "GRE", label: "GRE" },
+    { code: "BARTENDER", label: "Bartender" },
+    { code: "HOUSEKEEPING_WELLNESS", label: "Housekeeping" },
+    { code: "DRIVER", label: "Driver" },
+    { code: "STORE_KEEPER", label: "Store Keeper" },
+    { code: "STORE_MANAGER", label: "Store Manager" },
+    { code: "MAINTENANCE", label: "Maintenance" },
+    { code: "FNB_SERVICE", label: "F&B Service" },
+    { code: "CULINARY", label: "Culinary & Pastry" },
+    { code: "MIXOLOGY", label: "Bar & Mixology" },
+    { code: "ROOMS", label: "Front Office & Rooms" },
+    { code: "EXECUTIVE", label: "Executive & GM" },
+    { code: "PRE_OPENING", label: "Pre-Opening & Projects" },
+    { code: "SALES_MARKETING", label: "Sales & Marketing" }
+  ];
+
+  function buildDepartmentChips(initialCode, onSelect) {
+    let selectedCode = initialCode || HOSPITALITY_DEPARTMENTS[0].code;
+    const wrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:8px;" });
+    function render() {
+      clearNode(wrap);
+      HOSPITALITY_DEPARTMENTS.forEach((dept) => {
+        const isActive = dept.code === selectedCode;
+        wrap.appendChild(
+          el("button", {
+            type: "button",
+            className: "chip" + (isActive ? " active" : ""),
+            text: dept.label,
+            onClick: () => {
+              selectedCode = dept.code;
+              render();
+              onSelect(dept);
+            }
+          })
+        );
+      });
+    }
+    render();
+    return {
+      node: wrap,
+      getSelected: () => HOSPITALITY_DEPARTMENTS.find((d) => d.code === selectedCode) || HOSPITALITY_DEPARTMENTS[0]
+    };
+  }
+
   const DEFAULT_SERVICES = [
     {
       id: "pre-opening",
@@ -667,6 +713,15 @@
       showAuthGate();
       return;
     }
+    const matchedDept = HOSPITALITY_DEPARTMENTS.find(
+      (d) => d.code.toLowerCase() === String(job.category || "").toLowerCase() ||
+        d.label.toLowerCase() === String(job.category || "").toLowerCase()
+    );
+    let chosenDept = matchedDept || HOSPITALITY_DEPARTMENTS[0];
+    const deptPicker = buildDepartmentChips(chosenDept.code, (dept) => {
+      chosenDept = dept;
+    });
+
     const fName = el("input", { value: state.user.fullName || "", placeholder: "Full Name *" });
     const fPhone = el("input", { type: "tel", placeholder: "Mobile Number *" });
     const fCity = el("input", { placeholder: "Current City *" });
@@ -687,6 +742,8 @@
         submitBtn.textContent = "Submitting...";
         try {
           await syncLoggedInUserProfile();
+          const extraNote = fNote.value.trim();
+          const combinedNote = "Department: " + chosenDept.label + (extraNote ? " | " + extraNote : "");
           await supaFetch("/rest/v1/job_applications", {
             method: "POST",
             headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
@@ -700,7 +757,7 @@
               candidate_phone: fPhone.value.trim(),
               years_experience: Math.max(0, Math.min(60, parseInt(fExp.value, 10) || 0)),
               current_property: fCurrentProp.value.trim() || "Hospitality Professional",
-              cover_note: fNote.value.trim(),
+              cover_note: combinedNote,
               status: "APPLIED"
             })
           });
@@ -717,14 +774,94 @@
     openSheet(
       "Apply: " + (job.title || "Hospitality Role"),
       [
+        el("div", { className: "field" }, [el("label", { text: "Select Your Department / Role (Tap to Choose) *" }), deptPicker.node]),
         el("div", { className: "field" }, [el("label", { text: "Full Name *" }), fName]),
         el("div", { className: "field" }, [el("label", { text: "Phone Number *" }), fPhone]),
         el("div", { className: "field" }, [el("label", { text: "Current City *" }), fCity]),
         el("div", { className: "field" }, [el("label", { text: "Current / Last Hotel or Company *" }), fCurrentProp]),
         el("div", { className: "field" }, [el("label", { text: "Years of Experience" }), fExp]),
-        el("div", { className: "field" }, [el("label", { text: "Cover Note" }), fNote])
+        el("div", { className: "field" }, [el("label", { text: "Cover Note (Optional)" }), fNote])
       ],
       [el("button", { className: "btn btn-outline", type: "button", text: "Cancel", onClick: closeSheet }), submitBtn]
+    );
+  }
+
+  function openCandidateProfileSheet() {
+    if (!state.user || !state.accessToken) {
+      showToast("Please sign in with Email OTP to update your CV profile.");
+      showAuthGate();
+      return;
+    }
+    let chosenDept = HOSPITALITY_DEPARTMENTS[0];
+    const fDesignation = el("input", { value: chosenDept.label, placeholder: "Auto-filled when you tap a department above" });
+    const deptPicker = buildDepartmentChips(chosenDept.code, (dept) => {
+      const prevWasAuto = !fDesignation.value.trim() ||
+        HOSPITALITY_DEPARTMENTS.some((d) => d.label.toLowerCase() === fDesignation.value.trim().toLowerCase());
+      chosenDept = dept;
+      if (prevWasAuto) fDesignation.value = dept.label;
+    });
+
+    const fName = el("input", { value: state.user.fullName || "", placeholder: "Your full name *" });
+    const fPhone = el("input", { type: "tel", placeholder: "Mobile / WhatsApp number *" });
+    const fCity = el("input", { placeholder: "Current City (e.g. Mumbai, Goa) *" });
+    const fEmployer = el("input", { placeholder: "Current / Recent Hotel or Restaurant" });
+    const fExp = el("input", { type: "number", value: "3", placeholder: "Years of experience" });
+    const fSkills = el("textarea", { placeholder: "Key skills or highlights (optional)..." });
+
+    const saveBtn = el("button", {
+      className: "btn btn-gold",
+      type: "button",
+      text: "Save CV Profile",
+      onClick: async () => {
+        if (fName.value.trim().length < 2 || fPhone.value.trim().length < 7) {
+          showToast("Please enter your full name and valid mobile number.");
+          return;
+        }
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+        try {
+          await syncLoggedInUserProfile();
+          await supaFetch("/rest/v1/candidate_profiles?on_conflict=user_id", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({
+              user_id: state.user.id,
+              full_name: fName.value.trim(),
+              email: state.user.email,
+              mobile_number: fPhone.value.trim(),
+              location: fCity.value.trim() || "India",
+              current_designation: fDesignation.value.trim() || chosenDept.label,
+              department: chosenDept.code,
+              total_experience_years: Math.max(0, Math.min(60, parseInt(fExp.value, 10) || 0)),
+              current_employer: fEmployer.value.trim() || "Hospitality Professional",
+              skills: fSkills.value.trim(),
+              job_alerts_enabled: true,
+              updated_at: new Date().toISOString()
+            })
+          });
+          closeSheet();
+          showToast("CV profile saved for " + chosenDept.label + "!");
+        } catch (err) {
+          showToast(err.message || "Could not save profile.");
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save CV Profile";
+        }
+      }
+    });
+
+    openSheet(
+      "Update My CV Profile",
+      [
+        el("div", { className: "field" }, [el("label", { text: "Select Department / Role (Tap to Choose) *" }), deptPicker.node]),
+        el("div", { className: "field" }, [el("label", { text: "Full Name *" }), fName]),
+        el("div", { className: "field" }, [el("label", { text: "Mobile Number *" }), fPhone]),
+        el("div", { className: "field" }, [el("label", { text: "Role / Position" }), fDesignation]),
+        el("div", { className: "field" }, [el("label", { text: "Current City" }), fCity]),
+        el("div", { className: "field" }, [el("label", { text: "Current / Recent Hotel or Company" }), fEmployer]),
+        el("div", { className: "field" }, [el("label", { text: "Years of Experience" }), fExp]),
+        el("div", { className: "field" }, [el("label", { text: "Key Skills (Optional)" }), fSkills])
+      ],
+      [el("button", { className: "btn btn-outline", type: "button", text: "Cancel", onClick: closeSheet }), saveBtn]
     );
   }
 
@@ -739,7 +876,23 @@
         el("div", { className: "eyebrow", text: "SIGNED IN VIA EMAIL OTP" }),
         el("div", { className: "serif", style: "font-size:20px;", text: state.user.fullName || "MILA Member" }),
         el("p", { className: "muted-copy", text: state.user.email }),
-        el("p", { className: "muted-copy", text: "Your session stays active automatically until you tap Sign Out." })
+        el("p", { className: "muted-copy", text: "Your session stays active automatically until you tap Sign Out." }),
+        el("div", { className: "btn-row", style: "margin-top:8px;" }, [
+          el("a", {
+            className: "btn btn-outline btn-sm",
+            href: "../legal/privacy-policy.html",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            text: "Privacy Policy"
+          }),
+          el("a", {
+            className: "btn btn-outline btn-sm",
+            href: "../legal/delete-account.html",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            text: "Delete Account"
+          })
+        ])
       ],
       [
         el("button", { className: "btn btn-outline", type: "button", text: "Close", onClick: closeSheet }),
@@ -1064,7 +1217,16 @@
       el("div", { className: "section-heading" }, [
         el("div", { className: "eyebrow", text: "MILA Talent • Executive Search" }),
         el("h2", { className: "serif", text: "Open Hospitality Careers" }),
-        el("p", { className: "muted-copy", text: "Live leadership and pre-opening roles curated by MILA Talent across India." })
+        el("p", { className: "muted-copy", text: "Tap your department to update your CV profile or apply directly to live hospitality roles." })
+      ])
+    );
+
+    root.appendChild(
+      el("div", { className: "card card-elevated" }, [
+        el("div", { className: "eyebrow", text: "CANDIDATE CV & DEPARTMENT" }),
+        el("div", { className: "serif", style: "font-size:18px;", text: "Update Your CV Profile in Seconds" }),
+        el("p", { className: "muted-copy", text: "Quickly tap Hostess, GRE, Bartender, Housekeeping, Driver, Store Keeper, Store Manager, Maintenance, or any hospitality department." }),
+        el("button", { className: "btn btn-outline btn-full", type: "button", text: "Update My CV / Department", onClick: openCandidateProfileSheet })
       ])
     );
 
@@ -1151,6 +1313,32 @@
       );
     });
     root.appendChild(regCard);
+
+    root.appendChild(
+      el("div", { className: "card" }, [
+        el("div", { className: "eyebrow", text: "PRIVACY & ACCOUNT DATA" }),
+        el("p", {
+          className: "muted-copy",
+          text: "Review how MILA Hospitality safeguards your personal details and resumes, or request permanent deletion of your account and data at any time."
+        }),
+        el("div", { className: "btn-row", style: "margin-top:6px;" }, [
+          el("a", {
+            className: "btn btn-outline",
+            href: "../legal/privacy-policy.html",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            text: "Privacy Policy"
+          }),
+          el("a", {
+            className: "btn btn-outline",
+            href: "../legal/delete-account.html",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            text: "Delete Account"
+          })
+        ])
+      ])
+    );
   }
 
   function renderScreen() {
@@ -1228,6 +1416,26 @@
         showAuthGate();
       }, false);
     }
+
+    addGroup("Legal & Privacy");
+    nav.appendChild(
+      el("a", {
+        className: "drawer-link",
+        href: "../legal/privacy-policy.html",
+        target: "_blank",
+        rel: "noopener noreferrer",
+        text: "Privacy Policy"
+      })
+    );
+    nav.appendChild(
+      el("a", {
+        className: "drawer-link",
+        href: "../legal/delete-account.html",
+        target: "_blank",
+        rel: "noopener noreferrer",
+        text: "Request Account & Data Deletion"
+      })
+    );
   }
 
   function openDrawer() {

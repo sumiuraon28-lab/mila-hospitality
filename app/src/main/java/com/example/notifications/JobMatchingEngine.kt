@@ -147,6 +147,14 @@ object JobMatchingEngine {
 
     private fun compatibleDepartmentsFor(category: RoleCategory): Set<HospitalityDepartment> = when (category) {
         RoleCategory.ALL -> HospitalityDepartment.entries.toSet()
+        RoleCategory.HOSTESS -> setOf(HospitalityDepartment.HOSTESS, HospitalityDepartment.GRE, HospitalityDepartment.FNB_SERVICE)
+        RoleCategory.GRE -> setOf(HospitalityDepartment.GRE, HospitalityDepartment.HOSTESS, HospitalityDepartment.ROOMS)
+        RoleCategory.BARTENDER -> setOf(HospitalityDepartment.BARTENDER, HospitalityDepartment.MIXOLOGY, HospitalityDepartment.FNB_SERVICE)
+        RoleCategory.HOUSEKEEPING -> setOf(HospitalityDepartment.HOUSEKEEPING_WELLNESS, HospitalityDepartment.ROOMS)
+        RoleCategory.DRIVER -> setOf(HospitalityDepartment.DRIVER)
+        RoleCategory.STORE_KEEPER -> setOf(HospitalityDepartment.STORE_KEEPER, HospitalityDepartment.STORE_MANAGER)
+        RoleCategory.STORE_MANAGER -> setOf(HospitalityDepartment.STORE_MANAGER, HospitalityDepartment.STORE_KEEPER)
+        RoleCategory.MAINTENANCE -> setOf(HospitalityDepartment.MAINTENANCE)
         RoleCategory.EXECUTIVE -> setOf(
             HospitalityDepartment.EXECUTIVE,
             HospitalityDepartment.PRE_OPENING
@@ -162,26 +170,38 @@ object JobMatchingEngine {
         RoleCategory.CULINARY -> setOf(HospitalityDepartment.CULINARY)
         RoleCategory.MIXOLOGY -> setOf(
             HospitalityDepartment.MIXOLOGY,
+            HospitalityDepartment.BARTENDER,
             HospitalityDepartment.FNB_SERVICE
         )
         RoleCategory.FNB_SERVICE -> setOf(
             HospitalityDepartment.FNB_SERVICE,
+            HospitalityDepartment.HOSTESS,
+            HospitalityDepartment.BARTENDER,
             HospitalityDepartment.MIXOLOGY
         )
         RoleCategory.ROOMS -> setOf(
             HospitalityDepartment.ROOMS,
+            HospitalityDepartment.GRE,
             HospitalityDepartment.HOUSEKEEPING_WELLNESS
         )
     }
 
     private fun categoryKeywordsFor(category: RoleCategory): List<String> = when (category) {
         RoleCategory.ALL -> emptyList()
+        RoleCategory.HOSTESS -> listOf("hostess", "host", "reception", "seating", "dining")
+        RoleCategory.GRE -> listOf("gre", "guest relations", "guest relation", "front desk", "concierge")
+        RoleCategory.BARTENDER -> listOf("bartender", "bar", "mixolog", "cocktail", "beverage")
+        RoleCategory.HOUSEKEEPING -> listOf("housekeeping", "house keeping", "room attendant", "laundry", "hk")
+        RoleCategory.DRIVER -> listOf("driver", "chauffeur", "valet", "transport", "fleet")
+        RoleCategory.STORE_KEEPER -> listOf("store keeper", "storekeeper", "inventory", "receiving", "purchasing")
+        RoleCategory.STORE_MANAGER -> listOf("store manager", "stores", "inventory", "procurement", "supply")
+        RoleCategory.MAINTENANCE -> listOf("maintenance", "maintainance", "engineering", "technician", "hvac", "electrician")
         RoleCategory.EXECUTIVE -> listOf("general manager", "gm", "hotel manager", "cluster", "vp", "director")
         RoleCategory.PRE_OPENING -> listOf("pre-opening", "pre opening", "opening", "launch")
         RoleCategory.CULINARY -> listOf("chef", "culinary", "kitchen", "pastry", "bakery", "gastronomy")
-        RoleCategory.MIXOLOGY -> listOf("mixolog", "bar", "beverage", "sommelier", "cocktail")
-        RoleCategory.FNB_SERVICE -> listOf("f&b", "food & beverage", "restaurant manager", "banquet", "cafe", "café")
-        RoleCategory.ROOMS -> listOf("front office", "rooms", "concierge", "guest", "housekeeping", "butler")
+        RoleCategory.MIXOLOGY -> listOf("mixolog", "bartender", "bar", "beverage", "sommelier", "cocktail")
+        RoleCategory.FNB_SERVICE -> listOf("f&b", "food & beverage", "restaurant manager", "banquet", "cafe", "café", "hostess")
+        RoleCategory.ROOMS -> listOf("front office", "rooms", "concierge", "guest", "gre", "housekeeping", "butler")
     }
 
     private fun matchesPreferredLocation(

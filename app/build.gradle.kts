@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.milahospitality.krmxqv"
     minSdk = 24
     targetSdk = 36
-    versionCode = 17
-    versionName = "2.6"
+    versionCode = 19
+    versionName = "2.8"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

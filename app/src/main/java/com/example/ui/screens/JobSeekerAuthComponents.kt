@@ -253,7 +253,14 @@ fun JobSeekerRegistrationForm(
                     val selected = department == dept
                     FilterChip(
                         selected = selected,
-                        onClick = { department = dept },
+                        onClick = {
+                            val wasAutoLabel = currentDesignation.isBlank() ||
+                                HospitalityDepartment.entries.any { it.label.equals(currentDesignation.trim(), ignoreCase = true) }
+                            department = dept
+                            if (wasAutoLabel) {
+                                currentDesignation = dept.label
+                            }
+                        },
                         label = { Text(dept.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MilaChampagneGold,

@@ -50,6 +50,7 @@ import com.example.data.CandidateProfile
 import com.example.data.ClientProfile
 import com.example.data.ConsultationInquiry
 import com.example.data.ConsultationServiceType
+import com.example.data.HospitalityDepartment
 import com.example.data.HospitalityRole
 import com.example.data.JobApplication
 import com.example.data.PrivateCvLocalVault
@@ -282,6 +283,7 @@ fun ConsultationRequestSheet(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun JobApplicationSheet(
     role: HospitalityRole,
@@ -335,6 +337,14 @@ fun JobApplicationSheet(
     }
     var currentProperty by remember(activeProfile) {
         mutableStateOf(activeProfile?.currentEmployer.orEmpty())
+    }
+    var selectedDepartment by remember(activeProfile, role) {
+        val fromProfile = activeProfile?.department?.takeIf { it.isNotBlank() }?.let { HospitalityDepartment.fromRaw(it) }
+        val fromRole = HospitalityDepartment.entries.firstOrNull {
+            it.name.equals(role.category.name, ignoreCase = true) ||
+                it.label.equals(role.category.displayLabel, ignoreCase = true)
+        }
+        mutableStateOf(fromProfile ?: fromRole ?: HospitalityDepartment.HOSTESS)
     }
     var coverNote by remember { mutableStateOf("") }
     var validationError by remember { mutableStateOf<String?>(null) }
@@ -473,6 +483,37 @@ fun JobApplicationSheet(
                 }
             }
 
+            Text(
+                text = "SELECT YOUR DEPARTMENT / ROLE (TAP TO CHOOSE)",
+                style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold)
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                HospitalityDepartment.entries.forEach { dept ->
+                    val selected = selectedDepartment == dept
+                    FilterChip(
+                        selected = selected,
+                        onClick = { selectedDepartment = dept },
+                        label = { Text(dept.label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MilaChampagneGold,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = MilaCharcoalDeep,
+                            labelColor = MilaIvoryMuted
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selected,
+                            borderColor = MilaCharcoalBorder,
+                            selectedBorderColor = MilaChampagneGold
+                        ),
+                        modifier = Modifier.testTag("apply_dept_${dept.name}")
+                    )
+                }
+            }
+
             MilaFormField(
                 value = candidateName,
                 onValueChange = { if (it.length <= 100) candidateName = it },
@@ -548,6 +589,14 @@ fun JobApplicationSheet(
                                 ?: currentUser?.email?.takeIf { it.isNotBlank() }
                                 ?: "${candidatePhone.filter { it.isDigit() }.ifBlank { "candidate" }}@phone.mila.local"
                         }
+                        val combinedNote = buildString {
+                            append("Department: ${selectedDepartment.label}")
+                            val extra = coverNote.trim()
+                            if (extra.isNotEmpty()) {
+                                append(" | ")
+                                append(extra)
+                            }
+                        }
                         onSubmit(
                             JobApplication(
                                 roleId = role.id,
@@ -558,7 +607,7 @@ fun JobApplicationSheet(
                                 candidatePhone = candidatePhone.trim(),
                                 yearsExperience = years,
                                 currentProperty = currentProperty.trim().ifBlank { "Hospitality Professional" },
-                                coverNote = coverNote.trim().takeIf { it.isNotEmpty() },
+                                coverNote = combinedNote,
                                 cvFileName = attachedCvName
                             )
                         )

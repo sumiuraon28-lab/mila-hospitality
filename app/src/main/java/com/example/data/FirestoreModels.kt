@@ -317,19 +317,30 @@ data class EnquiryConfirmation(
 )
 
 enum class HospitalityDepartment(val label: String) {
-    EXECUTIVE("Executive & General Management"),
-    CULINARY("Culinary & Pastry"),
+    HOSTESS("Hostess"),
+    GRE("GRE"),
+    BARTENDER("Bartender"),
+    HOUSEKEEPING_WELLNESS("Housekeeping"),
+    DRIVER("Driver"),
+    STORE_KEEPER("Store Keeper"),
+    STORE_MANAGER("Store Manager"),
+    MAINTENANCE("Maintenance"),
     FNB_SERVICE("Food & Beverage Service"),
+    CULINARY("Culinary & Pastry"),
     MIXOLOGY("Bar & Mixology"),
-    PRE_OPENING("Pre-Opening & Projects"),
     ROOMS("Front Office & Rooms"),
-    HOUSEKEEPING_WELLNESS("Housekeeping & Wellness"),
+    EXECUTIVE("Executive & General Management"),
+    PRE_OPENING("Pre-Opening & Projects"),
     SALES_MARKETING("Sales, Marketing & Events");
 
     companion object {
-        fun fromRaw(raw: String): HospitalityDepartment =
-            entries.firstOrNull { it.name == raw || it.label.equals(raw, ignoreCase = true) }
+        fun fromRaw(raw: String): HospitalityDepartment {
+            val clean = raw.trim()
+            if (clean.equals("HOUSEKEEPING", ignoreCase = true)) return HOUSEKEEPING_WELLNESS
+            if (clean.equals("MAINTAINANCE", ignoreCase = true)) return MAINTENANCE
+            return entries.firstOrNull { it.name.equals(clean, ignoreCase = true) || it.label.equals(clean, ignoreCase = true) }
                 ?: EXECUTIVE
+        }
     }
 }
 

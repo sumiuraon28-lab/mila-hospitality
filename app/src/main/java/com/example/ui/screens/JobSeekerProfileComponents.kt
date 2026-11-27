@@ -475,25 +475,21 @@ fun CandidateProfileEditorCard(
 
             CandidateTextField(fullName, { if (it.length <= 100) fullName = it }, "Full Name *", "Your full name", "edit_cand_full_name")
             CandidateTextField(mobileNumber, { if (it.length <= 25) mobileNumber = it }, "Mobile Number *", "+91 98100 00000", "edit_cand_mobile", KeyboardType.Phone)
-            CandidateTextField(currentDesignation, { if (it.length <= 100) currentDesignation = it }, "Current Role / Position", "e.g., Executive Chef, General Manager", "edit_cand_designation")
-            CandidateTextField(
-                value = totalExpText,
-                onValueChange = { input -> if (input.length <= 2 && input.all { it.isDigit() }) totalExpText = input },
-                label = "Years of Experience",
-                placeholder = "e.g., 5",
-                testTag = "edit_cand_experience",
-                keyboardType = KeyboardType.Number
-            )
-            CandidateTextField(currentEmployer, { if (it.length <= 120) currentEmployer = it }, "Current / Recent Hotel or Restaurant", "Property or hospitality group", "edit_cand_current_employer")
-            CandidateTextField(location, { if (it.length <= 80) location = it }, "Current City", "e.g., Mumbai, Goa, Udaipur", "edit_cand_location")
 
-            Text("DEPARTMENT", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
+            Text("SELECT DEPARTMENT / ROLE (TAP TO CHOOSE)", style = MaterialTheme.typography.labelSmall.copy(color = MilaChampagneGold))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 HospitalityDepartment.entries.forEach { dept ->
                     val selected = department == dept
                     FilterChip(
                         selected = selected,
-                        onClick = { department = dept },
+                        onClick = {
+                            val wasAutoLabel = currentDesignation.isBlank() ||
+                                HospitalityDepartment.entries.any { it.label.equals(currentDesignation.trim(), ignoreCase = true) }
+                            department = dept
+                            if (wasAutoLabel) {
+                                currentDesignation = dept.label
+                            }
+                        },
                         label = { Text(dept.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MilaChampagneGold,
@@ -511,6 +507,18 @@ fun CandidateProfileEditorCard(
                     )
                 }
             }
+
+            CandidateTextField(currentDesignation, { if (it.length <= 100) currentDesignation = it }, "Current Role / Position", "Auto-filled from tap above, or type custom role", "edit_cand_designation")
+            CandidateTextField(
+                value = totalExpText,
+                onValueChange = { input -> if (input.length <= 2 && input.all { it.isDigit() }) totalExpText = input },
+                label = "Years of Experience",
+                placeholder = "e.g., 5",
+                testTag = "edit_cand_experience",
+                keyboardType = KeyboardType.Number
+            )
+            CandidateTextField(currentEmployer, { if (it.length <= 120) currentEmployer = it }, "Current / Recent Hotel or Restaurant", "Property or hospitality group", "edit_cand_current_employer")
+            CandidateTextField(location, { if (it.length <= 80) location = it }, "Current City", "e.g., Mumbai, Goa, Udaipur", "edit_cand_location")
 
             CandidateTextField(email, { if (it.length <= 120) email = it }, "Email Address (Optional)", "you@example.com", "edit_cand_email", KeyboardType.Email)
             CandidateTextField(skills, { if (it.length <= 400) skills = it }, "Key Skills (Optional)", "e.g., Pre-opening, Culinary, Mixology, Operations", "edit_cand_skills", minLines = 2)

@@ -306,5 +306,55 @@ fun ContactUsScreen(
                 }
             }
         }
+
+        item {
+            val openLegalUrl: (String) -> Unit = { url ->
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }
+            }
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MilaCharcoalSurface),
+                border = BorderStroke(1.dp, MilaGoldSubtle),
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "PRIVACY & ACCOUNT DATA",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = MilaChampagneGold,
+                            letterSpacing = 1.5.sp
+                        )
+                    )
+                    Text(
+                        text = "Review how MILA Hospitality safeguards your personal details and resumes, or request permanent deletion of your account and data at any time.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = MilaWarmStone)
+                    )
+                    GoldOutlineButton(
+                        text = "Privacy Policy",
+                        onClick = {
+                            openLegalUrl("https://sumiuraon28-lab.github.io/mila-hospitality/legal/privacy-policy.html")
+                        },
+                        testTag = "open_privacy_policy_button",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    GoldOutlineButton(
+                        text = "Request Account & Data Deletion",
+                        onClick = {
+                            openLegalUrl("https://sumiuraon28-lab.github.io/mila-hospitality/legal/delete-account.html")
+                        },
+                        testTag = "open_delete_account_button",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
     }
 }
+
