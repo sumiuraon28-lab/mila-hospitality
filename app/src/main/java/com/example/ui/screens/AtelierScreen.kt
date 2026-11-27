@@ -102,14 +102,11 @@ fun AtelierScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             item {
-                HeroAtelierBanner(
-                    onExploreServicesClick = { onNavigateRoute("our_services") },
-                    onExploreCareersClick = { onNavigateRoute("careers") }
-                )
-            }
-
-            if (promoBanners.isNotEmpty()) {
-                item(key = "home_top_promo_banner") {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HeroAtelierBanner(
+                        onExploreServicesClick = { onNavigateRoute("our_services") },
+                        onExploreCareersClick = { onNavigateRoute("careers") }
+                    )
                     TopPromoBannerSection(
                         banners = promoBanners,
                         onOpenBannerPopup = { banner -> activePopupBanner = banner },

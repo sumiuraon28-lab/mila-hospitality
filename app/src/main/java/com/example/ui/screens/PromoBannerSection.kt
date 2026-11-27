@@ -37,10 +37,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -151,48 +160,87 @@ private fun rememberPromoBannerBitmap(imageUrl: String?): ImageBitmap? {
 fun TopPromoBannerSection(
     banners: List<PromoBanner>,
     onOpenBannerPopup: (PromoBanner) -> Unit,
+    onFallbackAction: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    if (banners.isEmpty()) return
+    var poppedIn by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        poppedIn = true
+    }
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+    AnimatedVisibility(
+        visible = poppedIn,
+        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+            scaleIn(
+                initialScale = 0.94f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+        modifier = modifier.fillMaxWidth()
     ) {
-        if (banners.size == 1) {
+        if (banners.isEmpty()) {
+            val defaultSpotlight = PromoBanner(
+                id = "mila_default_spotlight",
+                pageKey = "banner_default_spotlight",
+                tagLabel = "UPCOMING PROJECTS & ALERTS",
+                eyebrow = "MILA HOSPITALITY • FEATURED SPOTLIGHT",
+                headline = "New Openings & Upcoming Hospitality Projects",
+                subheadline = "Luxury hotel pre-openings, flagship restaurants, and exclusive announcements from MILA Hospitality.",
+                detailsCopy = "Stay tuned for upcoming luxury hotel pre-openings, craft cocktail lounges, and pan-India hospitality launches managed by MILA Hospitality Consultant. Tap below to enquire about launching your next hospitality venture with our advisory team.",
+                imageUrl = null,
+                theme = PromoBannerTheme.GOLD,
+                showAutoPopup = false,
+                actionRoute = "contact_us",
+                ctaLabel = "Enquire Now",
+                published = true
+            )
             PromoBannerCard(
-                banner = banners.first(),
-                onClick = { onOpenBannerPopup(banners.first()) }
+                banner = defaultSpotlight,
+                onClick = { onOpenBannerPopup(defaultSpotlight) }
             )
         } else {
-            val pagerState = rememberPagerState(pageCount = { banners.size })
-            HorizontalPager(
-                state = pagerState,
-                pageSpacing = 12.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) { page ->
-                val banner = banners[page]
-                PromoBannerCard(
-                    banner = banner,
-                    indexBadge = "${page + 1} / ${banners.size}",
-                    onClick = { onOpenBannerPopup(banner) }
-                )
-            }
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                repeat(banners.size) { idx ->
-                    val selected = pagerState.currentPage == idx
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .height(6.dp)
-                            .width(if (selected) 22.dp else 6.dp)
-                            .clip(CircleShape)
-                            .background(if (selected) MilaChampagneGold else MilaWarmStone.copy(alpha = 0.4f))
+                if (banners.size == 1) {
+                    PromoBannerCard(
+                        banner = banners.first(),
+                        onClick = { onOpenBannerPopup(banners.first()) }
                     )
+                } else {
+                    val pagerState = rememberPagerState(pageCount = { banners.size })
+                    HorizontalPager(
+                        state = pagerState,
+                        pageSpacing = 12.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { page ->
+                        val banner = banners[page]
+                        PromoBannerCard(
+                            banner = banner,
+                            indexBadge = "${page + 1} / ${banners.size}",
+                            onClick = { onOpenBannerPopup(banner) }
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(banners.size) { idx ->
+                            val selected = pagerState.currentPage == idx
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .height(6.dp)
+                                    .width(if (selected) 22.dp else 6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (selected) MilaChampagneGold else MilaWarmStone.copy(alpha = 0.4f))
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -203,7 +251,8 @@ fun TopPromoBannerSection(
 private fun PromoBannerCard(
     banner: PromoBanner,
     onClick: () -> Unit,
-    indexBadge: String? = null
+    indexBadge: String? = null,
+    modifier: Modifier = Modifier
 ) {
     val palette = paletteForTheme(banner.theme)
     val imageBitmap = rememberPromoBannerBitmap(banner.imageUrl)
@@ -213,7 +262,7 @@ private fun PromoBannerCard(
         shape = MaterialTheme.shapes.large,
         border = BorderStroke(1.2.dp, palette.accent.copy(alpha = 0.65f)),
         colors = CardDefaults.cardColors(containerColor = MilaCharcoalElevated),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("home_promo_banner_${banner.pageKey}")
     ) {
@@ -460,23 +509,11 @@ fun PromoBannerPopupDialog(
                         Image(
                             bitmap = imageBitmap,
                             contentDescription = banner.headline,
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(16f / 10f)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color(0x66000000),
-                                            Color.Transparent,
-                                            MilaCharcoalSurface.copy(alpha = 0.85f)
-                                        )
-                                    )
-                                )
+                                .heightIn(min = 180.dp, max = 340.dp)
+                                .background(MilaCharcoalDeep)
                         )
                     } else {
                         Spacer(modifier = Modifier.height(64.dp))

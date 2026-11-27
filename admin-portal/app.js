@@ -2590,19 +2590,25 @@
       reader.onerror = () => reject(new Error("Could not read selected image file."));
       reader.onload = () => {
         const img = new Image();
-        img.onerror = () => reject(new Error("Selected file is not a valid image."));
+        img.onerror = () => reject(new Error("Unsupported image format. Please choose a JPG, PNG, or WebP photo."));
         img.onload = () => {
-          const maxWidth = 1080;
-          const scale = img.width > maxWidth ? maxWidth / img.width : 1;
-          const targetW = Math.max(1, Math.round(img.width * scale));
-          const targetH = Math.max(1, Math.round(img.height * scale));
-          const canvas = document.createElement("canvas");
-          canvas.width = targetW;
-          canvas.height = targetH;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0, targetW, targetH);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
-          resolve(dataUrl);
+          try {
+            const maxWidth = 960;
+            const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+            const targetW = Math.max(1, Math.round(img.width * scale));
+            const targetH = Math.max(1, Math.round(img.height * scale));
+            const canvas = document.createElement("canvas");
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#121614";
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+            resolve(dataUrl);
+          } catch (e) {
+            reject(new Error("Could not optimize image. Try a smaller JPG or PNG image."));
+          }
         };
         img.src = reader.result;
       };
@@ -2614,6 +2620,7 @@
     const cfg = parseBannerConfig(banner.hero_image_key);
     const theme = bannerThemeStyle(cfg.theme);
     const actionObj = BANNER_ACTIONS.find((a) => a.key === cfg.actionRoute) || BANNER_ACTIONS[0];
+    const updatedLabel = formatTimestamp(banner.updated_at);
 
     const actions = [];
     if (canManage) {
@@ -2633,11 +2640,17 @@
           onClick: async () => {
             try {
               const nextPub = !banner.published;
-              await supabaseRequest("/rest/v1/website_content?id=eq." + encodeURIComponent(banner.id), {
-                method: "PATCH",
-                body: { published: nextPub }
-              });
-              await logAudit("WEBSITE_CONTENT_MANAGEMENT", nextPub ? "PUBLISH_BANNER" : "HIDE_BANNER", banner.id, (nextPub ? "Published" : "Hid") + " top banner: " + (banner.headline || banner.page_title));
+              await mutateTable(
+                "PATCH",
+                "/rest/v1/website_content?id=eq." + encodeURIComponent(banner.id),
+                { published: nextPub },
+                {
+                  module: "WEBSITE_CONTENT_MANAGEMENT",
+                  action: nextPub ? "PUBLISH_BANNER" : "HIDE_BANNER",
+                  targetId: banner.id,
+                  summary: (nextPub ? "Published" : "Hid") + " top banner: " + (banner.headline || banner.page_title)
+                }
+              );
               showToast(nextPub ? "Banner is now live on the app Home screen." : "Banner hidden from users.");
               await refreshAllData(false);
             } catch (err) {
@@ -2651,17 +2664,25 @@
           className: "btn btn-danger btn-sm",
           type: "button",
           text: "Delete",
-          onClick: async () => {
-            if (!window.confirm("Delete banner '" + (banner.headline || banner.page_title || "Banner") + "' permanently?")) return;
-            try {
-              await supabaseRequest("/rest/v1/website_content?id=eq." + encodeURIComponent(banner.id), { method: "DELETE" });
-              await logAudit("WEBSITE_CONTENT_MANAGEMENT", "DELETE_BANNER", banner.id, "Deleted top banner: " + (banner.headline || banner.page_title));
-              showToast("Banner deleted.");
-              await refreshAllData(false);
-            } catch (err) {
-              showToast(err.message || "Failed to delete banner.");
-            }
-          }
+          onClick: () =>
+            confirmDelete(
+              "Delete Top Banner?",
+              "Permanently delete '" + (banner.headline || banner.page_title || "Banner") + "' from the MILA app?",
+              async () => {
+                await mutateTable(
+                  "DELETE",
+                  "/rest/v1/website_content?id=eq." + encodeURIComponent(banner.id),
+                  null,
+                  {
+                    module: "WEBSITE_CONTENT_MANAGEMENT",
+                    action: "DELETE_BANNER",
+                    targetId: banner.id,
+                    summary: "Deleted top banner: " + (banner.headline || banner.page_title)
+                  }
+                );
+                showToast("Banner deleted.");
+              }
+            )
         })
       );
     }
@@ -2670,16 +2691,18 @@
       ? el("img", {
           src: banner.hero_image_url,
           alt: banner.headline || "Banner preview",
-          style: "width:100%;max-height:170px;object-fit:cover;border-radius:10px;border:1px solid rgba(212,175,122,0.35);margin-bottom:8px;"
+          style: "width:100%;max-height:180px;object-fit:cover;border-radius:10px;border:1px solid rgba(212,175,122,0.35);margin-bottom:8px;"
         })
       : null;
 
     return el("div", { className: "record-card", style: "background:" + theme.bg + ";border-color:" + theme.accent + "55;" }, [
       previewImg,
       el("div", { className: "record-top" }, [
-        pill(banner.page_title || "ANNOUNCEMENT", "gold"),
-        pill(banner.published ? "LIVE IN APP" : "HIDDEN DRAFT", banner.published ? "emerald" : "muted"),
-        cfg.showPopup ? pill("AUTO-POPUP ON OPEN", "gold") : null
+        el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center;" }, [
+          pill(banner.page_title || "ANNOUNCEMENT", "gold"),
+          pill(banner.published ? "LIVE IN APP" : "HIDDEN DRAFT", banner.published ? "emerald" : "muted"),
+          cfg.showPopup ? pill("AUTO-POPUP ON OPEN", "gold") : null
+        ])
       ]),
       banner.eyebrow ? el("div", { className: "record-small", style: "color:" + theme.accent + ";font-weight:600;letter-spacing:0.8px;", text: banner.eyebrow.toUpperCase() }) : null,
       el("div", { className: "record-title", text: banner.headline || "Untitled Banner" }),
@@ -2689,14 +2712,14 @@
         : null,
       el("div", {
         className: "record-small",
-        text: "Button: '" + (banner.cta_label || "Explore Details") + "' → " + actionObj.label + (banner.updated_at ? " • Updated: " + formatDateTime(banner.updated_at) : "")
+        text: "Button: '" + (banner.cta_label || "Explore Details") + "' → " + actionObj.label + (updatedLabel ? " • Updated: " + updatedLabel : "")
       }),
       actions.length ? el("div", { className: "record-actions" }, actions) : null
     ]);
   }
 
   function openBannerModal(existing) {
-    const isEdit = Boolean(existing);
+    const isEdit = Boolean(existing && existing.id);
     const existingCfg = parseBannerConfig(existing ? existing.hero_image_key : "");
 
     let imageDataUrl = existing && existing.hero_image_url ? String(existing.hero_image_url) : "";
@@ -2708,7 +2731,7 @@
 
     const tagSelect = el(
       "select",
-      { className: "filter-select", style: "width:100%;" },
+      { style: "width:100%;" },
       BANNER_TAG_PRESETS.map((t) => el("option", { value: t, text: t }))
     );
     if (BANNER_TAG_PRESETS.includes(selectedTag)) {
@@ -2755,7 +2778,7 @@
 
     const themeSelect = el(
       "select",
-      { className: "filter-select", style: "width:100%;" },
+      { style: "width:100%;" },
       BANNER_THEMES.map((t) => el("option", { value: t.key, text: t.label }))
     );
     themeSelect.value = selectedTheme;
@@ -2766,7 +2789,7 @@
 
     const actionSelect = el(
       "select",
-      { className: "filter-select", style: "width:100%;" },
+      { style: "width:100%;" },
       BANNER_ACTIONS.map((a) => el("option", { value: a.key, text: a.label }))
     );
     actionSelect.value = selectedAction;
@@ -2776,7 +2799,7 @@
 
     const imageStatusText = el("div", {
       className: "record-small",
-      text: imageDataUrl ? "Custom banner image attached." : "Optional: Upload any poster, ad graphic, or project photo from your phone/computer."
+      text: imageDataUrl ? "Custom banner image attached." : "Optional: Upload any poster, ad graphic, or project photo from your phone gallery."
     });
 
     const imageUrlInput = el("input", {
@@ -2799,20 +2822,32 @@
     const fileInput = el("input", {
       type: "file",
       accept: "image/*",
-      style: "width:100%;padding:8px;border:1px dashed rgba(212,175,122,0.5);border-radius:8px;background:rgba(0,0,0,0.2);color:#F3EFE6;"
+      style: "display:none;"
+    });
+    const choosePhotoBtn = el("button", {
+      className: "btn btn-outline btn-full",
+      type: "button",
+      text: "Upload Poster / Photo from Phone Gallery",
+      onClick: () => fileInput.click()
     });
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
       imageStatusText.textContent = "Optimizing image for mobile app...";
+      choosePhotoBtn.disabled = true;
+      choosePhotoBtn.textContent = "Optimizing photo...";
       try {
         imageDataUrl = await compressBannerImageFile(file);
         imageUrlInput.value = "";
         const kb = Math.round((imageDataUrl.length * 0.75) / 1024);
-        imageStatusText.textContent = "Image uploaded & optimized (" + kb + " KB). Ready to post!";
+        imageStatusText.textContent = "Photo uploaded & ready (" + kb + " KB)! Tap 'Post Live Banner' below.";
         updateLivePreview();
       } catch (err) {
         imageStatusText.textContent = err.message || "Image upload failed.";
+        showToast(err.message || "Image upload failed.");
+      } finally {
+        choosePhotoBtn.disabled = false;
+        choosePhotoBtn.textContent = imageDataUrl ? "Change Uploaded Poster / Photo" : "Upload Poster / Photo from Phone Gallery";
       }
     });
 
@@ -2824,21 +2859,24 @@
         imageDataUrl = "";
         imageUrlInput.value = "";
         fileInput.value = "";
+        choosePhotoBtn.textContent = "Upload Poster / Photo from Phone Gallery";
         imageStatusText.textContent = "Image removed. Using MILA luxury designed banner.";
         updateLivePreview();
       }
     });
 
-    const popupCheck = el("input", { type: "checkbox", checked: autoPopupEnabled });
+    const popupCheck = el("input", { type: "checkbox", checked: autoPopupEnabled, style: "width:auto;" });
     popupCheck.addEventListener("change", () => {
       autoPopupEnabled = popupCheck.checked;
       updateLivePreview();
     });
 
-    const pubCheck = el("input", { type: "checkbox", checked: isPublished });
+    const pubCheck = el("input", { type: "checkbox", checked: isPublished, style: "width:auto;" });
     pubCheck.addEventListener("change", () => {
       isPublished = pubCheck.checked;
     });
+
+    const modalErrorBox = el("div", { className: "error-box hidden" });
 
     const previewBox = el("div", {
       style: "border-radius:12px;overflow:hidden;border:1px solid rgba(212,175,122,0.6);margin-bottom:12px;"
@@ -2854,7 +2892,7 @@
           el("img", {
             src: imageDataUrl,
             alt: "Live preview",
-            style: "width:100%;max-height:150px;object-fit:cover;display:block;"
+            style: "width:100%;max-height:170px;object-fit:cover;display:block;"
           })
         );
       }
@@ -2893,61 +2931,33 @@
     updateLivePreview();
 
     const bodyNodes = [
+      modalErrorBox,
       el("div", { className: "eyebrow", style: "margin-bottom:6px;", text: "LIVE APP BANNER PREVIEW (TOP OF HOME SCREEN)" }),
       previewBox,
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Upload Banner Poster / Ad Image (Phone Gallery or Computer)" }),
+      el("div", { className: "field" }, [
+        el("label", { text: "Upload Banner Poster / Ad Image" }),
         fileInput,
-        el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;" }, [
+        choosePhotoBtn,
+        el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;" }, [
           imageStatusText,
           removeImageBtn
         ])
       ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Or Paste Image URL (Optional)" }),
-        imageUrlInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Alert Type Preset" }),
-        tagSelect
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Banner Tag Label *" }),
-        customTagInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Small Badge (City / Launch Date)" }),
-        eyebrowInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Banner Headline *" }),
-        headlineInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Short Subtitle (Shown on Banner)" }),
-        subheadlineInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Full Upcoming Project / Ad Details (Shown in Popup)" }),
-        detailsInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Banner Color Design Theme" }),
-        themeSelect
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "Button Text" }),
-        ctaInput
-      ]),
-      el("div", { className: "field-group" }, [
-        el("label", { text: "When User Taps Button" }),
-        actionSelect
-      ]),
-      el("label", { style: "display:flex;gap:8px;align-items:center;margin:10px 0;" }, [
+      buildFormField("Or Paste Image URL (Optional)", imageUrlInput),
+      buildFormField("Alert Type Preset", tagSelect),
+      buildFormField("Banner Tag Label *", customTagInput),
+      buildFormField("Small Badge (City / Launch Date)", eyebrowInput),
+      buildFormField("Banner Headline *", headlineInput),
+      buildFormField("Short Subtitle (Shown on Banner)", subheadlineInput),
+      buildFormField("Full Upcoming Project / Ad Details (Shown in Popup)", detailsInput),
+      buildFormField("Banner Color Design Theme", themeSelect),
+      buildFormField("Button Text", ctaInput),
+      buildFormField("When User Taps Button", actionSelect),
+      el("label", { style: "display:flex;gap:8px;align-items:center;margin:10px 0;font-size:13px;" }, [
         popupCheck,
-        el("span", { text: "Show as a Popup Alert when users open the app (recommended for big launches)" })
+        el("span", { text: "Show as a Popup Alert when users open the app" })
       ]),
-      el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0;" }, [
+      el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px;" }, [
         pubCheck,
         el("span", { text: "Published (Show live at the top of the app Home screen right now)" })
       ])
@@ -2958,14 +2968,17 @@
       type: "button",
       text: isEdit ? "Save Banner Changes" : "Post Live Banner",
       onClick: async () => {
+        modalErrorBox.classList.add("hidden");
         const headline = headlineInput.value.trim();
         const tagLabel = customTagInput.value.trim() || "ANNOUNCEMENT";
         if (!headline) {
+          modalErrorBox.textContent = "Please enter a Banner Headline before posting.";
+          modalErrorBox.classList.remove("hidden");
           showToast("Please enter a Banner Headline.");
           return;
         }
         saveBtn.disabled = true;
-        saveBtn.textContent = "Saving...";
+        saveBtn.textContent = "Posting...";
         try {
           const payload = {
             page_title: tagLabel,
@@ -2977,29 +2990,44 @@
             hero_image_url: imageDataUrl || null,
             cta_label: ctaInput.value.trim() || "Explore Details",
             published: pubCheck.checked,
-            updated_by: state.user ? state.user.id : null
+            updated_by: state.admin && state.admin.uid ? state.admin.uid : null
           };
           if (isEdit) {
-            await supabaseRequest("/rest/v1/website_content?id=eq." + encodeURIComponent(existing.id), {
-              method: "PATCH",
-              body: payload
-            });
-            await logAudit("WEBSITE_CONTENT_MANAGEMENT", "UPDATE_BANNER", existing.id, "Updated top banner: " + headline);
+            await mutateTable(
+              "PATCH",
+              "/rest/v1/website_content?id=eq." + encodeURIComponent(existing.id),
+              payload,
+              {
+                module: "WEBSITE_CONTENT_MANAGEMENT",
+                action: "UPDATE_BANNER",
+                targetId: existing.id,
+                summary: "Updated top banner: " + headline
+              }
+            );
             showToast("Banner updated live!");
           } else {
             const slug = headline.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "promo";
             payload.page_key = "banner_" + slug + "_" + Date.now();
-            await supabaseRequest("/rest/v1/website_content", {
-              method: "POST",
-              body: payload
-            });
-            await logAudit("WEBSITE_CONTENT_MANAGEMENT", "CREATE_BANNER", payload.page_key, "Posted top banner: " + headline);
+            await mutateTable(
+              "POST",
+              "/rest/v1/website_content",
+              payload,
+              {
+                module: "WEBSITE_CONTENT_MANAGEMENT",
+                action: "CREATE_BANNER",
+                targetId: payload.page_key,
+                summary: "Posted top banner: " + headline
+              }
+            );
             showToast("Top banner posted live to the MILA app!");
           }
           closeModal();
           await refreshAllData(false);
         } catch (err) {
-          showToast(err.message || "Could not save banner.");
+          const msg = (err && err.message) || "Could not save banner.";
+          modalErrorBox.textContent = msg;
+          modalErrorBox.classList.remove("hidden");
+          showToast(msg);
           saveBtn.disabled = false;
           saveBtn.textContent = isEdit ? "Save Banner Changes" : "Post Live Banner";
         }

@@ -79,7 +79,7 @@ fun HeroAtelierBanner(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(410.dp)
+            .height(320.dp)
     ) {
         Image(
             painter = painterResource(id = R.drawable.img_hero_hotel_1795637232836),
@@ -104,8 +104,8 @@ fun HeroAtelierBanner(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             StatusPill(
                 label = "Indian Hospitality Consultancy & Recruitment",
@@ -117,10 +117,10 @@ fun HeroAtelierBanner(
             )
             Text(
                 text = "Turnkey hotel pre-openings, café and restaurant setups, champion mixology curation, and executive hospitality recruitment.",
-                style = MaterialTheme.typography.bodyLarge.copy(color = MilaIvoryMuted),
+                style = MaterialTheme.typography.bodyMedium.copy(color = MilaIvoryMuted),
                 modifier = Modifier.widthIn(max = 560.dp)
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
