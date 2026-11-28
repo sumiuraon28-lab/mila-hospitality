@@ -67,6 +67,9 @@ jobs:
             echo "::error::Could not open keystore with STORE_PASSWORD and alias 'upload'. Make sure UPLOAD_KEYSTORE_BASE64 came from keytool with -alias upload and STORE_PASSWORD matches the password used to generate it."
             exit 1
           fi
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 --decode debug.keystore.base64 > debug.keystore
+          fi
           echo "Verified Play Store upload keystore and alias 'upload'."
 
       - name: Configure Supabase environment (.env)
