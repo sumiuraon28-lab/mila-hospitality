@@ -55,18 +55,24 @@ jobs:
       - name: Prepare Play Store upload keystore
         env:
           UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          RAW_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          RAW_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           CLEAN_B64="$(printf '%s' "$UPLOAD_KEYSTORE_BASE64" | tr -d '\n\r\t ')"
+          CLEAN_STORE_PASS="$(printf '%s' "$RAW_STORE_PASSWORD" | tr -d '\r\n')"
+          CLEAN_KEY_PASS="$(printf '%s' "$RAW_KEY_PASSWORD" | tr -d '\r\n')"
           if ! printf '%s' "$CLEAN_B64" | base64 --decode > "${GITHUB_WORKSPACE}/my-upload-key.jks" 2>/dev/null; then
-            echo "::error::UPLOAD_KEYSTORE_BASE64 is not valid Base64 text. Do not paste a password here — paste the entire contents of keystore.txt generated via keytool + base64."
+            echo "::error::UPLOAD_KEYSTORE_BASE64 is not valid Base64 text. Do not paste a password here — paste the entire contents of your keystore text file."
             exit 1
           fi
           chmod 600 "${GITHUB_WORKSPACE}/my-upload-key.jks"
-          if ! keytool -list -keystore "${GITHUB_WORKSPACE}/my-upload-key.jks" -storepass "$STORE_PASSWORD" -alias upload >/dev/null 2>&1; then
-            echo "::error::Could not open keystore with STORE_PASSWORD and alias 'upload'. Make sure UPLOAD_KEYSTORE_BASE64 came from keytool with -alias upload and STORE_PASSWORD matches the password used to generate it."
+          BYTES="$(wc -c < "${GITHUB_WORKSPACE}/my-upload-key.jks")"
+          echo "Decoded keystore file size: ${BYTES} bytes"
+          KEYTOOL_OUT="$(keytool -list -keystore "${GITHUB_WORKSPACE}/my-upload-key.jks" -storepass "$CLEAN_STORE_PASS" -alias upload 2>&1)" || {
+            SAFE_ERR="$(printf '%s' "$KEYTOOL_OUT" | tr '\n' ' ' | cut -c1-240)"
+            echo "::error::Keystore open failed (${BYTES} bytes): ${SAFE_ERR}"
             exit 1
-          fi
+          }
           if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
             base64 --decode debug.keystore.base64 > debug.keystore
           fi
@@ -91,9 +97,12 @@ jobs:
       - name: Build signed Play Store Android App Bundle (.aab)
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle :app:bundleRelease --no-daemon
+          RAW_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          RAW_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          export STORE_PASSWORD="$(printf '%s' "$RAW_STORE_PASSWORD" | tr -d '\r\n')"
+          export KEY_PASSWORD="$(printf '%s' "$RAW_KEY_PASSWORD" | tr -d '\r\n')"
+          gradle :app:bundleRelease --no-daemon
 
       - name: Prepare downloadable Play Store AAB
         run: cp app/build/outputs/bundle/release/app-release.aab Mila-Hospitality-PlayStore.aab
