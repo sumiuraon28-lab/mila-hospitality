@@ -55,9 +55,19 @@ jobs:
       - name: Prepare Play Store upload keystore
         env:
           UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: |
-          printf '%s' "$UPLOAD_KEYSTORE_BASE64" | tr -d '\n\r ' | base64 --decode > "${GITHUB_WORKSPACE}/my-upload-key.jks"
+          CLEAN_B64="$(printf '%s' "$UPLOAD_KEYSTORE_BASE64" | tr -d '\n\r\t ')"
+          if ! printf '%s' "$CLEAN_B64" | base64 --decode > "${GITHUB_WORKSPACE}/my-upload-key.jks" 2>/dev/null; then
+            echo "::error::UPLOAD_KEYSTORE_BASE64 is not valid Base64 text. Do not paste a password here — paste the entire contents of keystore.txt generated via keytool + base64."
+            exit 1
+          fi
           chmod 600 "${GITHUB_WORKSPACE}/my-upload-key.jks"
+          if ! keytool -list -keystore "${GITHUB_WORKSPACE}/my-upload-key.jks" -storepass "$STORE_PASSWORD" -alias upload >/dev/null 2>&1; then
+            echo "::error::Could not open keystore with STORE_PASSWORD and alias 'upload'. Make sure UPLOAD_KEYSTORE_BASE64 came from keytool with -alias upload and STORE_PASSWORD matches the password used to generate it."
+            exit 1
+          fi
+          echo "Verified Play Store upload keystore and alias 'upload'."
 
       - name: Configure Supabase environment (.env)
         env:
